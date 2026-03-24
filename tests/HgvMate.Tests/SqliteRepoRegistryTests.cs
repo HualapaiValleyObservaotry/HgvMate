@@ -56,7 +56,7 @@ public sealed class SqliteRepoRegistryTests
         Assert.AreEqual("main", record.Branch);
         Assert.AreEqual("github", record.Source);
         Assert.IsTrue(record.Enabled);
-        Assert.IsTrue(record.Id > 0);
+        Assert.IsGreaterThan(record.Id, 0);
     }
 
     [TestMethod]
@@ -81,7 +81,7 @@ public sealed class SqliteRepoRegistryTests
         await _registry.AddAsync("repo1", "https://github.com/org/repo1", "main", "github");
         await _registry.AddAsync("repo2", "https://github.com/org/repo2", "main", "github");
         var repos = await _registry.GetAllAsync();
-        Assert.AreEqual(2, repos.Count);
+        Assert.HasCount(repos, 2);
     }
 
     [TestMethod]

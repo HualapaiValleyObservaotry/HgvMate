@@ -88,7 +88,7 @@ public sealed class SourceCodeReaderTests
     public async Task ListDirectoryAsync_RootDirectory_ReturnsEntries()
     {
         var entries = await _reader.ListDirectoryAsync("testrepo", "");
-        Assert.IsTrue(entries.Count >= 2);
+        Assert.IsGreaterThanOrEqualTo(entries.Count, 2);
         Assert.IsTrue(entries.Any(e => e.EndsWith("README.md") || e == "README.md"));
     }
 
