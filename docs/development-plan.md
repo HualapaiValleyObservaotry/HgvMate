@@ -21,7 +21,7 @@ The ONNX model is an **encoder** (text → 384-dim vector), not an LLM. Copilot 
 | Repo management | Admin tool calls (add/remove/reindex) | Dynamic, no coupling to Tex workspace or submodules |
 | Transport | Both stdio + SSE (config-driven) | stdio for local dev, SSE for Azure Container App |
 | Tool naming | `hgvmate_*` prefix | Avoid collisions with other MCP servers |
-| Git credentials | Managed Identity + PAT fallback | MI for Azure (no secrets to manage), PAT for local dev |
+| Git credentials | Per-source PAT + Managed Identity fallback | Each repo source (GitHub, Azure DevOps) uses its own PAT; MI fallback for Azure |
 | Search layers | git grep + ONNX/sqlite-vec + GitNexus | Text, semantic, and structural — each answers different questions |
 | Persistence | Single `/data` volume with SQLite | One mount point, survives container updates, no external DB |
 | Structural analysis | GitNexus embedded in container (Option B) | Transparent orchestration, no separate deployment |
@@ -86,7 +86,7 @@ docker run -i --rm -v hgvmate-data:/data -e AZURE_DEVOPS_PAT=... hgvmate:latest
 | 1 | **NuGet packages** — `ModelContextProtocol`, `Microsoft.ML.OnnxRuntime`, `Microsoft.Data.Sqlite`, `Microsoft.Extensions.Hosting`, `Azure.Identity` |
 | 2 | **Configuration model** — `HgvMateOptions` (DataPath, Transport), `RepoSyncOptions` (PollIntervalMinutes, ClonePath), `SearchOptions`, `CredentialOptions` in `Configuration/` |
 | 3 | **Program.cs** — `HostApplicationBuilder` with MCP server, DI, hosted services. Resolve DataPath from env var → config → `./data`. Ensure directories exist. Transport selection from config |
-| 4 | **Git credential provider** — `GitCredentialProvider`: tries `DefaultAzureCredential` (managed identity) first, falls back to PAT from config/env var. Injects auth into git commands |
+| 4 | **Git credential provider** — `GitCredentialProvider`: resolves credentials per repo source. For `github` repos, uses `GITHUB_TOKEN`. For `azuredevops` repos, uses `AZURE_DEVOPS_PAT`. Falls back to `DefaultAzureCredential` (managed identity) when running in Azure. Injects auth into git clone/pull commands |
 | 5 | **SQLite initialization** — Open/create `/data/hgvmate.db`, run schema migrations (idempotent). Tables: `repositories` |
 
 ### Phase 2: Repository Management
@@ -95,11 +95,11 @@ docker run -i --rm -v hgvmate-data:/data -e AZURE_DEVOPS_PAT=... hgvmate:latest
 
 | Step | Description |
 |------|-------------|
-| 6 | **`repositories` table** — Schema: id, name, url, branch, enabled, last_sha, last_synced, added_by |
+| 6 | **`repositories` table** — Schema: id, name, url, branch, source (`github` or `azuredevops`), enabled, last_sha, last_synced, added_by. The `source` field determines which credential to use for git operations |
 | 7 | **IRepoRegistry + SqliteRepoRegistry** — `AddAsync`, `RemoveAsync`, `GetAllAsync`, `GetByNameAsync`, `UpdateLastShaAsync` |
 | 8 | **RepoSyncService** — `BackgroundService`: on startup reads registry, clones missing repos (`--depth 1 --single-branch`), pulls existing repos. Uses `GitCredentialProvider`. If `PollIntervalMinutes > 0`, starts poll timer |
 | 9 | **Admin MCP tools** (class: `AdminTools`) |
-|   | — `hgvmate_add_repository(name, url, branch?)`: insert into registry, trigger clone + index |
+|   | — `hgvmate_add_repository(name, url, branch?, source?)`: insert into registry, trigger clone + index. `source` defaults to `github`; set to `azuredevops` for Azure DevOps repos |
 |   | — `hgvmate_remove_repository(name)`: remove from registry, delete clone directory |
 |   | — `hgvmate_list_repositories()`: all repos with sync status, last SHA, last synced time |
 |   | — `hgvmate_reindex(repository?)`: trigger immediate sync + re-index for one or all repos |
@@ -193,7 +193,7 @@ Phases 3, 4, 5 are independent — they all just need repos cloned (Phase 2).
 
 | Tool | Phase | Backend | Description |
 |------|-------|---------|-------------|
-| `hgvmate_add_repository` | 2 | SqliteRepoRegistry | Add a repo to be indexed |
+| `hgvmate_add_repository` | 2 | SqliteRepoRegistry | Add a repo to be indexed (source: github or azuredevops) |
 | `hgvmate_remove_repository` | 2 | SqliteRepoRegistry | Remove a repo and its data |
 | `hgvmate_list_repositories` | 2 | SqliteRepoRegistry | List repos with sync status |
 | `hgvmate_reindex` | 2+6 | RepoSyncService | Force sync + re-index |
@@ -216,7 +216,6 @@ HgvMate/
 ├── appsettings.json
 ├── appsettings.Development.json
 ├── docs/
-│   ├── mcp-server-design.md
 │   └── development-plan.md          ← this file
 ├── src/HgvMate.Mcp/
 │   ├── HgvMate.Mcp.csproj
@@ -225,7 +224,8 @@ HgvMate/
 │   │   ├── HgvMateOptions.cs
 │   │   ├── RepoSyncOptions.cs
 │   │   ├── SearchOptions.cs
-│   │   └── CredentialOptions.cs
+│   │   ├── CredentialOptions.cs
+│   │   └── RepoSource.cs              ← enum: GitHub, AzureDevOps
 │   ├── Tools/
 │   │   ├── AdminTools.cs
 │   │   ├── SourceCodeTools.cs

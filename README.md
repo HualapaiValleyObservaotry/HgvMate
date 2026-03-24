@@ -4,7 +4,7 @@ An MCP (Model Context Protocol) server that provides AI-powered tools access to 
 
 ## Architecture
 
-See [docs/mcp-server-design.md](docs/mcp-server-design.md) for the full design document.
+See [docs/development-plan.md](docs/development-plan.md) for the full design and development plan.
 
 ## Quick Start
 
