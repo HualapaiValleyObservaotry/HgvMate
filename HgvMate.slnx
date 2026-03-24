@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HgvMate.Mcp/HgvMate.Mcp.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HgvMate.Tests/HgvMate.Tests.csproj" />
+  </Folder>
+</Solution>
