@@ -1,0 +1,46 @@
+{
+	"name": "HgvMate MCP Server",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"features": {
+		"ghcr.io/devcontainers/features/node:1": {
+			"version": "22"
+		},
+		"ghcr.io/devcontainers/features/docker-in-docker:2": {},
+		"ghcr.io/devcontainers/features/github-cli:1": {},
+		"ghcr.io/devcontainers/features/azure-cli:1": {}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-dotnettools.csdevkit",
+				"ms-dotnettools.csharp",
+				"ms-azuretools.vscode-docker",
+				"GitHub.copilot",
+				"GitHub.copilot-chat"
+			],
+			"settings": {
+				"dotnet.defaultSolution": "HgvMate.slnx"
+			}
+		}
+	},
+	"postCreateCommand": "bash .devcontainer/post-create.sh",
+	"remoteEnv": {
+		"AZURE_DEVOPS_PAT": "${localEnv:AZURE_DEVOPS_PAT}",
+		"GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}",
+		"HGVMATE_DATA_PATH": "/workspaces/HgvMate/.data"
+	},
+	"mounts": [
+		"source=hgvmate-data,target=/workspaces/HgvMate/.data,type=volume"
+	],
+	"forwardPorts": [
+		3001
+	],
+	"portsAttributes": {
+		"3001": {
+			"label": "HgvMate SSE",
+			"onAutoForward": "notify"
+		}
+	}
+}
