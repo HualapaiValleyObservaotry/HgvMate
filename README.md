@@ -10,7 +10,7 @@ An MCP (Model Context Protocol) server that provides AI agents with source code 
 - **REST API** with OpenAPI/Scalar documentation alongside MCP
 - **ONNX model** — all-MiniLM-L6-v2 (384-dim embeddings, ~80 MB, auto-downloads from Hugging Face)
 - **SQLite** — single-file database with binary BLOB vector storage and in-memory cache
-- **Docker** — Alpine multi-stage build with ONNX model baked in
+- **Docker** — Ubuntu multi-stage build with ONNX model baked in, multi-arch (amd64 + arm64)
 - **In-memory vector cache** — pre-loads embeddings at startup for sub-10ms search
 - **116 tests** — unit, integration, protocol, SSE, REST API, live ONNX, and Docker tests
 

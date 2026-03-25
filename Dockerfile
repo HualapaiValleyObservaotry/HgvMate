@@ -1,20 +1,29 @@
 # ── Stage 1: build ────────────────────────────────────────────────────────────
-FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG TARGETARCH
 WORKDIR /src
 COPY . .
-RUN dotnet publish src/HgvMate.Mcp/HgvMate.Mcp.csproj \
+RUN dotnet_rid="linux-$([ "$TARGETARCH" = "amd64" ] && echo x64 || echo $TARGETARCH)" && \
+    dotnet publish src/HgvMate.Mcp/HgvMate.Mcp.csproj \
     -c Release \
-    -r linux-musl-x64 \
+    -r "$dotnet_rid" \
     --self-contained true \
     -p:PublishSingleFile=false \
     -o /app
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-FROM alpine:3.21 AS runtime
+FROM ubuntu:24.04 AS runtime
 
-# git (repo operations) + Node.js / npm (GitNexus) + curl (model download)
-# .NET self-contained native deps on musl: libstdc++ icu-libs
-RUN apk add --no-cache git nodejs npm curl libstdc++ icu-libs
+# git (repo operations) + curl (model download) + .NET self-contained native deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl ca-certificates libstdc++6 libicu74 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 22 (required by GitNexus / @ladybugdb/core which needs Node 20+ and glibc 2.38+)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/* && \
+    npm install -g gitnexus@latest
 
 WORKDIR /app
 COPY --from=build /app .
@@ -26,5 +35,6 @@ RUN mkdir -p /app/models && \
 
 VOLUME /data
 ENV HgvMate__DataPath=/data
+ENV ASPNETCORE_URLS=http://+:5000
 ENTRYPOINT ["/app/HgvMate.Mcp"]
 

@@ -126,7 +126,7 @@ public sealed class DockerTests
             $"run --rm --entrypoint /bin/sh {ImageName} -c \"test -f /app/models/all-MiniLM-L6-v2.onnx && echo EXISTS || echo MISSING\"",
             timeoutMs: 30_000);
 
-        Assert.Contains(result.output.Trim(), "EXISTS",
+        Assert.Contains("EXISTS", result.output.Trim(),
             $"ONNX model should be baked into the Docker image at /app/models/. Got: {result.output}");
     }
 
@@ -147,7 +147,111 @@ public sealed class DockerTests
             timeoutMs: 30_000);
 
         Assert.AreEqual(0, result.exitCode, $"git should be available in container. Stderr: {result.stderr}");
-        Assert.Contains(result.output, "git version", $"Expected 'git version', got: {result.output}");
+        Assert.Contains("git version", result.output, $"Expected 'git version', got: {result.output}");
+    }
+
+    [TestMethod]
+    public void Docker_ImageHasNodeJs20OrLater()
+    {
+        if (!IsDockerAvailable())
+            Assert.Inconclusive("Docker is not available.");
+
+        var contextDir = FindRepoRoot();
+        if (contextDir == null)
+            Assert.Inconclusive("Cannot find repository root with Dockerfile.");
+
+        EnsureImageBuilt(contextDir);
+
+        var result = RunCommand("docker",
+            $"run --rm --entrypoint node {ImageName} --version",
+            timeoutMs: 30_000);
+
+        Assert.AreEqual(0, result.exitCode, $"node should be available in container. Stderr: {result.stderr}");
+
+        // Parse major version from e.g. "v22.22.1"
+        var version = result.output.Trim().TrimStart('v');
+        var major = int.Parse(version.Split('.')[0]);
+        Assert.IsGreaterThanOrEqualTo(20, major,
+            $"Node.js 20+ is required for GitNexus. Got: {result.output.Trim()}");
+    }
+
+    [TestMethod]
+    public void Docker_ImageContainsGitNexus()
+    {
+        if (!IsDockerAvailable())
+            Assert.Inconclusive("Docker is not available.");
+
+        var contextDir = FindRepoRoot();
+        if (contextDir == null)
+            Assert.Inconclusive("Cannot find repository root with Dockerfile.");
+
+        EnsureImageBuilt(contextDir);
+
+        var result = RunCommand("docker",
+            $"run --rm --entrypoint /bin/sh {ImageName} -c \"npx gitnexus --version 2>&1\"",
+            timeoutMs: 60_000);
+
+        Assert.AreEqual(0, result.exitCode,
+            $"gitnexus should be pre-installed. Exit code: {result.exitCode}. Output: {result.output}. Stderr: {result.stderr}");
+    }
+
+    [TestMethod]
+    public async Task Docker_SseHealthEndpointResponds()
+    {
+        if (!IsDockerAvailable())
+            Assert.Inconclusive("Docker is not available.");
+
+        var contextDir = FindRepoRoot();
+        if (contextDir == null)
+            Assert.Inconclusive("Cannot find repository root with Dockerfile.");
+
+        EnsureImageBuilt(contextDir);
+
+        var containerName = $"hgvmate-health-test-{Guid.NewGuid():N}";
+
+        try
+        {
+            // Start container in SSE mode
+            RunCommand("docker",
+                $"run -d --name {containerName} -e HGVMATE_TRANSPORT=sse -p 0:5000 {ImageName}",
+                timeoutMs: 30_000);
+
+            // Get the mapped host port
+            var portResult = RunCommand("docker",
+                $"port {containerName} 5000",
+                timeoutMs: 10_000);
+            var hostPort = portResult.output.Trim().Split(':').Last();
+
+            // Wait for startup
+            await Task.Delay(5000);
+
+            // Hit the health endpoint
+            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            var response = await httpClient.GetAsync($"http://localhost:{hostPort}/health");
+            var body = await response.Content.ReadAsStringAsync();
+
+            Assert.AreEqual(System.Net.HttpStatusCode.OK, response.StatusCode,
+                $"Health endpoint should return 200. Got: {response.StatusCode}. Body: {body}");
+
+            var doc = JsonDocument.Parse(body);
+            Assert.IsTrue(doc.RootElement.TryGetProperty("status", out var status),
+                $"Health response should have 'status'. Body: {body}");
+            Assert.AreEqual("healthy", status.GetString());
+
+            // Verify embedder is available
+            Assert.IsTrue(doc.RootElement.TryGetProperty("embedder", out var embedder),
+                "Health response should have 'embedder'.");
+            Assert.IsTrue(embedder.GetProperty("available").GetBoolean(),
+                $"ONNX embedder should be available in Docker container. Body: {body}");
+        }
+        finally
+        {
+            try
+            {
+                RunCommand("docker", $"rm -f {containerName}", timeoutMs: 15_000);
+            }
+            catch { }
+        }
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────
