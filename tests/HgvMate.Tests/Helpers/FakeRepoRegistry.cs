@@ -2,7 +2,7 @@ using HgvMate.Mcp.Repos;
 
 namespace HgvMate.Tests;
 
-internal sealed class FakeRepoRegistry : IRepoRegistry
+internal class FakeRepoRegistry : IRepoRegistry
 {
     private readonly List<RepoRecord> _repos = new();
 
@@ -26,7 +26,7 @@ internal sealed class FakeRepoRegistry : IRepoRegistry
     public Task<RepoRecord?> GetByNameAsync(string name)
         => Task.FromResult(_repos.FirstOrDefault(r => r.Name == name));
 
-    public Task<bool> UpdateLastShaAsync(string name, string sha)
+    public virtual Task<bool> UpdateLastShaAsync(string name, string sha)
         => Task.FromResult(true);
 
     public Task<bool> UpdateLastSyncedAsync(string name, DateTime syncedAt)

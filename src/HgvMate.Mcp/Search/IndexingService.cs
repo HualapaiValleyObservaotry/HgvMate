@@ -32,7 +32,7 @@ public class IndexingService
         _logger = logger;
     }
 
-    public async Task IndexRepoAsync(string repoName, CancellationToken cancellationToken = default)
+    public virtual async Task IndexRepoAsync(string repoName, CancellationToken cancellationToken = default)
     {
         if (!_embedder.IsAvailable)
         {
@@ -83,7 +83,7 @@ public class IndexingService
         _logger.LogInformation("Indexed {Files} files ({Chunks} chunks) for repo '{Repo}'.", fileCount, chunkCount, repoName);
     }
 
-    public async Task IndexFileAsync(string repoName, string relativePath, CancellationToken cancellationToken = default)
+    public virtual async Task IndexFileAsync(string repoName, string relativePath, CancellationToken cancellationToken = default)
     {
         if (!_embedder.IsAvailable) return;
 

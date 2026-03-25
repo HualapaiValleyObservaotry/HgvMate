@@ -1,0 +1,25 @@
+{
+  "servers": {
+    "hgvmate-stdio": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": ["run", "--project", "src/HgvMate.Mcp"],
+      "env": {
+        "HgvMate__DataPath": "${env:HOME}/.hgvmate/data"
+      }
+    },
+    "hgvmate-docker": {
+      "type": "stdio",
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "-v", "${env:HOME}/.hgvmate/data:/data",
+        "hgvmate"
+      ]
+    },
+    "hgvmate-remote": {
+      "type": "sse",
+      "url": "http://localhost:5000/sse"
+    }
+  }
+}
