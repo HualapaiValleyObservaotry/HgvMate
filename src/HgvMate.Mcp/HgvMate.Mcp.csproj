@@ -8,6 +8,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="HVO.Enterprise.Telemetry" Version="1.0.0" />
+    <PackageReference Include="HVO.Enterprise.Telemetry.Data.AdoNet" Version="1.0.0" />
+    <PackageReference Include="HVO.Enterprise.Telemetry.OpenTelemetry" Version="1.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0-rc.2.*" />
     <PackageReference Include="ModelContextProtocol" Version="0.3.0-preview.1" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="0.3.0-preview.1" />

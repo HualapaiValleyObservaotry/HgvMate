@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using HgvMate.Mcp.Configuration;
+using HVO.Enterprise.Telemetry.Abstractions;
 using Microsoft.Extensions.Logging;
 
 namespace HgvMate.Mcp.Search;
@@ -11,6 +13,7 @@ public class HybridSearchService
     private readonly VectorStore _vectorStore;
     private readonly IOnnxEmbedder _embedder;
     private readonly SearchOptions _searchOptions;
+    private readonly ITelemetryService? _telemetry;
     private readonly ILogger<HybridSearchService> _logger;
 
     public HybridSearchService(
@@ -18,12 +21,14 @@ public class HybridSearchService
         VectorStore vectorStore,
         IOnnxEmbedder embedder,
         SearchOptions searchOptions,
-        ILogger<HybridSearchService> logger)
+        ILogger<HybridSearchService> logger,
+        ITelemetryService? telemetry = null)
     {
         _grepService = grepService;
         _vectorStore = vectorStore;
         _embedder = embedder;
         _searchOptions = searchOptions;
+        _telemetry = telemetry;
         _logger = logger;
     }
 
@@ -32,26 +37,36 @@ public class HybridSearchService
         string? repositoryName = null,
         CancellationToken cancellationToken = default)
     {
+        var sw = Stopwatch.StartNew();
+        _telemetry?.RecordMetric("hgvmate.search.requests", 1);
+
         var grepTask = _grepService.SearchAsync(query, repositoryName, cancellationToken);
         var vectorTask = SearchVectorAsync(query, repositoryName, cancellationToken);
 
-        await Task.WhenAll(grepTask, vectorTask);
-
-        var results = new List<SearchResult>();
-        foreach (var r in grepTask.Result)
-            results.Add(new SearchResult(r.RepoName, r.FilePath, r.LineNumber, r.LineContent, 1.0f));
-
-        var existingFiles = results.Select(r => (r.RepoName, r.FilePath)).ToHashSet();
-        foreach (var r in vectorTask.Result)
+        try
         {
-            if (!existingFiles.Contains((r.RepoName, r.FilePath)))
-                results.Add(new SearchResult(r.RepoName, r.FilePath, 0, r.Content, r.Score));
-        }
+            await Task.WhenAll(grepTask, vectorTask);
 
-        return results
-            .OrderByDescending(r => r.Score)
-            .Take(_searchOptions.MaxResults)
-            .ToList();
+            var results = new List<SearchResult>();
+            foreach (var r in grepTask.Result)
+                results.Add(new SearchResult(r.RepoName, r.FilePath, r.LineNumber, r.LineContent, 1.0f));
+
+            var existingFiles = results.Select(r => (r.RepoName, r.FilePath)).ToHashSet();
+            foreach (var r in vectorTask.Result)
+            {
+                if (!existingFiles.Contains((r.RepoName, r.FilePath)))
+                    results.Add(new SearchResult(r.RepoName, r.FilePath, 0, r.Content, r.Score));
+            }
+
+            return results
+                .OrderByDescending(r => r.Score)
+                .Take(_searchOptions.MaxResults)
+                .ToList();
+        }
+        finally
+        {
+            _telemetry?.RecordMetric("hgvmate.search.duration_ms", sw.Elapsed.TotalMilliseconds);
+        }
     }
 
     private async Task<IReadOnlyList<VectorSearchResult>> SearchVectorAsync(

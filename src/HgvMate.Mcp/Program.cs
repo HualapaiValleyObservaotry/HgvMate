@@ -5,6 +5,14 @@ using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
 using HgvMate.Mcp.Tools;
+using HVO.Enterprise.Telemetry;
+using HVO.Enterprise.Telemetry.Abstractions;
+using HVO.Enterprise.Telemetry.Correlation;
+using HVO.Enterprise.Telemetry.Data.AdoNet;
+using HVO.Enterprise.Telemetry.Data.AdoNet.Extensions;
+using HVO.Enterprise.Telemetry.HealthChecks;
+using HVO.Enterprise.Telemetry.Logging;
+using HVO.Enterprise.Telemetry.OpenTelemetry;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -47,6 +55,16 @@ if (useSse)
         ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
                          | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
                          | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost
+    });
+
+    // Correlation ID middleware — assigns/propagates X-Correlation-ID (before exception handler)
+    app.Use(async (context, next) =>
+    {
+        var correlationId = context.Request.Headers["X-Correlation-ID"].FirstOrDefault()
+            ?? Guid.NewGuid().ToString("N");
+        using var scope = CorrelationContext.BeginScope(correlationId);
+        context.Response.Headers["X-Correlation-ID"] = correlationId;
+        await next();
     });
 
     app.UseExceptionHandler(errApp =>
@@ -141,6 +159,49 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
     services.AddSingleton(searchOptions);
     services.AddSingleton(credentialOptions);
 
+    // ── HVO.Enterprise.Telemetry ────────────────────────────────────────
+    services.AddTelemetry(configuration.GetSection("Telemetry"));
+
+    services.AddTelemetryLoggingEnrichment(options =>
+    {
+        options.IncludeCorrelationId = true;
+        options.IncludeTraceId = true;
+        options.IncludeSpanId = true;
+    });
+
+    services.AddAdoNetTelemetry(options =>
+    {
+        options.RecordStatements = true;
+        options.RecordParameters = false; // never log parameter values (PII safety)
+        options.RecordConnectionInfo = false;
+    });
+
+    var telemetrySection = configuration.GetSection("Telemetry");
+    var serviceName = telemetrySection["ServiceName"] ?? "HgvMate";
+    var serviceVersion = telemetrySection["ServiceVersion"] ?? "1.0.0";
+    var otlpEndpoint = telemetrySection["OtlpEndpoint"] ?? configuration["Telemetry:OtlpEndpoint"];
+    if (!string.IsNullOrEmpty(otlpEndpoint))
+    {
+        services.AddOpenTelemetryExport(options =>
+        {
+            options.ServiceName = serviceName;
+            options.ServiceVersion = serviceVersion;
+            options.Endpoint = otlpEndpoint;
+            options.EnableTraceExport = true;
+            options.EnableMetricsExport = true;
+            options.EnableLogExport = true;
+        });
+    }
+
+    services.AddTelemetryStatistics();
+    services.AddTelemetryHealthCheck(new TelemetryHealthCheckOptions
+    {
+        DegradedErrorRateThreshold = 5.0,
+        UnhealthyErrorRateThreshold = 20.0,
+        MaxExpectedQueueDepth = 10000,
+    });
+
+    // ── Data + Services ─────────────────────────────────────────────────
     services.AddSingleton<ISqliteConnectionFactory>(sp =>
         new SqliteConnectionFactory(connectionString, sp.GetRequiredService<ILogger<SqliteConnectionFactory>>()));
     services.AddSingleton<DatabaseInitializer>();

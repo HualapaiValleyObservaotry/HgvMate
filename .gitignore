@@ -8,3 +8,4 @@ bin/
 obj/
 .data/
 add-repos.sh
+nohup.out

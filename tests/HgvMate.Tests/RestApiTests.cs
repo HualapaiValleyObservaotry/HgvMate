@@ -7,6 +7,7 @@ using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
 using HgvMate.Mcp.Tools;
+using HVO.Enterprise.Telemetry;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
@@ -263,6 +264,20 @@ public sealed class RestApiTests : IDisposable
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
     }
 
+    [TestMethod]
+    public async Task Diagnostics_ReturnsOk_WithExpectedFields()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/diagnostics");
+
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.IsTrue(body.TryGetProperty("uptime", out _));
+        Assert.IsTrue(body.TryGetProperty("queueDepth", out _));
+    }
+
     // ── Test app factory ────────────────────────────────────────────────
 
     private async Task<WebApplication> CreateTestApp(bool markReady = true)
@@ -296,6 +311,12 @@ public sealed class RestApiTests : IDisposable
         builder.Services.AddSingleton<VectorStore>();
         builder.Services.AddSingleton<IndexingService>();
         builder.Services.AddSingleton<HybridSearchService>();
+
+        builder.Services.AddTelemetry(options =>
+        {
+            options.ServiceName = "HgvMate.Tests";
+            options.Enabled = true;
+        });
 
         builder.Services.AddOpenApi();
 
