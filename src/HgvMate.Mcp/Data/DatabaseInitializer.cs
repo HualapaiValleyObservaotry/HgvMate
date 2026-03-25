@@ -47,6 +47,10 @@ public class DatabaseInitializer
         await AddColumnIfMissingAsync(conn, "failed_sync_count", "INTEGER NOT NULL DEFAULT 0");
         await AddColumnIfMissingAsync(conn, "sync_state", "TEXT NOT NULL DEFAULT 'pending'");
 
+        // Enable WAL mode for concurrent read/write access (critical for Azure Files/SMB)
+        using (var walCmd = new SqliteCommand("PRAGMA journal_mode=WAL;", conn))
+            await walCmd.ExecuteNonQueryAsync();
+
         _logger.LogInformation("Database schema initialized.");
     }
 
