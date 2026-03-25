@@ -152,7 +152,7 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
         .PersistKeysToFileSystem(keysDir);
 
     var dbPath = Path.Combine(dataPath, "hgvmate.db");
-    var connectionString = $"Data Source={dbPath}";
+    var connectionString = $"Data Source={dbPath};Default Timeout=30";
 
     services.AddSingleton(hgvMateOptions);
     services.AddSingleton(repoSyncOptions);

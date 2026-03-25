@@ -60,7 +60,7 @@ public class RepoSyncService : BackgroundService
             await Task.Delay(500, stoppingToken);
 
         _logger.LogInformation("RepoSyncService starting...");
-        await SyncAllAsync(stoppingToken);
+        await RunSyncSafelyAsync(stoppingToken);
 
         if (_syncOptions.PollIntervalMinutes <= 0)
         {
@@ -71,7 +71,24 @@ public class RepoSyncService : BackgroundService
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(_syncOptions.PollIntervalMinutes));
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            await SyncAllAsync(stoppingToken);
+            await RunSyncSafelyAsync(stoppingToken);
+        }
+    }
+
+    private async Task RunSyncSafelyAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await SyncAllAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw; // Allow graceful shutdown
+        }
+        catch (Exception ex)
+        {
+            _telemetry?.TrackException(ex);
+            _logger.LogError(ex, "SyncAll cycle failed. Will retry on next poll.");
         }
     }
 
