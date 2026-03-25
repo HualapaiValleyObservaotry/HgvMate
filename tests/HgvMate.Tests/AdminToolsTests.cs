@@ -1,5 +1,6 @@
 using HgvMate.Mcp.Configuration;
 using HgvMate.Mcp.Repos;
+using HgvMate.Mcp.Search;
 using HgvMate.Mcp.Tools;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -147,10 +148,38 @@ public sealed class AdminToolsTests
         public FakeRepoSyncService(IRepoRegistry registry)
             : base(registry,
                    new FakeCredentialProvider(),
-                   new HgvMateOptions { DataPath = "./testdata" },
+                   new HgvMateOptions { DataPath = Path.GetTempPath() },
                    new RepoSyncOptions(),
+                   CreateIndexingService(),
+                   CreateGitNexusService(),
                    NullLogger<RepoSyncService>.Instance)
         {
+        }
+
+        private static HgvMate.Mcp.Search.IndexingService CreateIndexingService()
+        {
+            var opts = new HgvMateOptions { DataPath = Path.GetTempPath() };
+            var sync = new RepoSyncOptions();
+            var reader = new HgvMate.Mcp.Search.SourceCodeReader(opts, sync,
+                NullLogger<HgvMate.Mcp.Search.SourceCodeReader>.Instance);
+            var embedder = new HgvMate.Mcp.Search.OnnxEmbedder(
+                (Microsoft.ML.OnnxRuntime.InferenceSession?)null,
+                NullLogger<HgvMate.Mcp.Search.OnnxEmbedder>.Instance);
+            // Use a null-returning factory so VectorStore never hits disk
+            var factory = new NullConnectionFactory();
+            var store = new HgvMate.Mcp.Search.VectorStore(factory,
+                NullLogger<HgvMate.Mcp.Search.VectorStore>.Instance);
+            return new HgvMate.Mcp.Search.IndexingService(store, embedder, reader,
+                new SearchOptions(),
+                NullLogger<HgvMate.Mcp.Search.IndexingService>.Instance);
+        }
+
+        private static HgvMate.Mcp.Search.GitNexusService CreateGitNexusService()
+        {
+            return new HgvMate.Mcp.Search.GitNexusService(
+                new HgvMateOptions { DataPath = Path.GetTempPath() },
+                new RepoSyncOptions(),
+                NullLogger<HgvMate.Mcp.Search.GitNexusService>.Instance);
         }
 
         public override Task SyncRepoAsync(RepoRecord repo, CancellationToken cancellationToken = default)
@@ -158,6 +187,12 @@ public sealed class AdminToolsTests
 
         public override Task SyncAllAsync(CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+    }
+
+    private sealed class NullConnectionFactory : HgvMate.Mcp.Data.ISqliteConnectionFactory
+    {
+        public Microsoft.Data.Sqlite.SqliteConnection CreateConnection()
+            => new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
     }
 
     private sealed class FakeCredentialProvider : IGitCredentialProvider

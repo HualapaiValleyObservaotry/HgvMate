@@ -52,6 +52,9 @@ builder.Services.AddHostedService<RepoSyncService>(sp => sp.GetRequiredService<R
 builder.Services.AddSingleton<SourceCodeReader>();
 builder.Services.AddSingleton<GitGrepSearchService>();
 builder.Services.AddSingleton<GitNexusService>();
+builder.Services.AddSingleton<IOnnxEmbedder, OnnxEmbedder>();
+builder.Services.AddSingleton<VectorStore>();
+builder.Services.AddSingleton<IndexingService>();
 builder.Services.AddSingleton<HybridSearchService>();
 
 builder.Services.AddMcpServer()
@@ -64,5 +67,8 @@ var app = builder.Build();
 
 var dbInit = app.Services.GetRequiredService<DatabaseInitializer>();
 await dbInit.InitializeAsync();
+
+var vectorStore = app.Services.GetRequiredService<VectorStore>();
+await vectorStore.EnsureSchemaAsync();
 
 await app.RunAsync();

@@ -1,4 +1,5 @@
 using HgvMate.Mcp.Configuration;
+using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Search;
 using HgvMate.Mcp.Tools;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -10,6 +11,7 @@ public sealed class SourceCodeToolsTests
 {
     private string _tempDir = null!;
     private SourceCodeTools _tools = null!;
+    private static int _dbCounter;
 
     [TestInitialize]
     public void Setup()
@@ -24,9 +26,19 @@ public sealed class SourceCodeToolsTests
         var reader = new SourceCodeReader(hgvOptions, syncOptions, NullLogger<SourceCodeReader>.Instance);
 
         // Create a mock registry with no repos
+        var id = System.Threading.Interlocked.Increment(ref _dbCounter);
+        var connStr = $"Data Source=sct{id};Mode=Memory;Cache=Shared";
+        using var conn = new Microsoft.Data.Sqlite.SqliteConnection(connStr);
+        conn.Open();
+        var factory = new TestConnectionFactory(connStr);
+        var vectorStore = new VectorStore(factory, NullLogger<VectorStore>.Instance);
+        vectorStore.EnsureSchemaAsync().Wait();
+
+        var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null,
+            NullLogger<OnnxEmbedder>.Instance);
         var fakeRegistry = new FakeRepoRegistry();
         var grepService = new GitGrepSearchService(fakeRegistry, reader, searchOptions, NullLogger<GitGrepSearchService>.Instance);
-        var hybridSearch = new HybridSearchService(grepService, NullLogger<HybridSearchService>.Instance);
+        var hybridSearch = new HybridSearchService(grepService, vectorStore, embedder, searchOptions, NullLogger<HybridSearchService>.Instance);
 
         _tools = new SourceCodeTools(hybridSearch, reader);
 
@@ -83,5 +95,12 @@ public sealed class SourceCodeToolsTests
     {
         var result = await _tools.GetFileContent("testrepo", "nonexistent.txt");
         StringAssert.Contains(result, "Error");
+    }
+
+    private sealed class TestConnectionFactory : ISqliteConnectionFactory
+    {
+        private readonly string _connStr;
+        public TestConnectionFactory(string connStr) => _connStr = connStr;
+        public Microsoft.Data.Sqlite.SqliteConnection CreateConnection() => new Microsoft.Data.Sqlite.SqliteConnection(_connStr);
     }
 }

@@ -1,4 +1,5 @@
 using HgvMate.Mcp.Configuration;
+using HgvMate.Mcp.Search;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -10,6 +11,8 @@ public class RepoSyncService : BackgroundService
     private readonly IGitCredentialProvider _credentialProvider;
     private readonly HgvMateOptions _hgvMateOptions;
     private readonly RepoSyncOptions _syncOptions;
+    private readonly IndexingService _indexingService;
+    private readonly GitNexusService _gitNexusService;
     private readonly ILogger<RepoSyncService> _logger;
 
     public RepoSyncService(
@@ -17,12 +20,16 @@ public class RepoSyncService : BackgroundService
         IGitCredentialProvider credentialProvider,
         HgvMateOptions hgvMateOptions,
         RepoSyncOptions syncOptions,
+        IndexingService indexingService,
+        GitNexusService gitNexusService,
         ILogger<RepoSyncService> logger)
     {
         _registry = registry;
         _credentialProvider = credentialProvider;
         _hgvMateOptions = hgvMateOptions;
         _syncOptions = syncOptions;
+        _indexingService = indexingService;
+        _gitNexusService = gitNexusService;
         _logger = logger;
     }
 
@@ -79,6 +86,17 @@ public class RepoSyncService : BackgroundService
 
             await _registry.UpdateLastSyncedAsync(repo.Name, DateTime.UtcNow);
             _logger.LogInformation("Repo '{Name}' synced successfully (SHA: {Sha}).", repo.Name, sha ?? "unknown");
+
+            await _indexingService.IndexRepoAsync(repo.Name, cancellationToken);
+
+            try
+            {
+                await _gitNexusService.AnalyzeAsync(repo.Name, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "GitNexus analysis failed for '{Name}'; continuing.", repo.Name);
+            }
         }
         catch (Exception ex)
         {
