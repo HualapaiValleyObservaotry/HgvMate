@@ -52,6 +52,15 @@ public class DatabaseInitializer
 
     private static async Task AddColumnIfMissingAsync(SqliteConnection conn, string columnName, string columnDef)
     {
+        // Validate column name and definition against a strict allowlist to prevent injection.
+        // These values come from the hardcoded migration list above and should never be dynamic.
+        var allowedColumns = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "last_error", "last_error_at", "failed_sync_count", "sync_state"
+        };
+        if (!allowedColumns.Contains(columnName))
+            throw new ArgumentException($"Unexpected column name '{columnName}' in migration.", nameof(columnName));
+
         try
         {
             var sql = $"ALTER TABLE repositories ADD COLUMN {columnName} {columnDef};";

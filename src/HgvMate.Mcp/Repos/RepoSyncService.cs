@@ -229,7 +229,11 @@ public class RepoSyncService : BackgroundService
                 await Task.Delay(delay, cancellationToken);
             }
         }
-        throw lastException!;
+
+        if (lastException != null)
+            throw lastException;
+
+        throw new InvalidOperationException($"{operationName} failed for repo '{repoName}' after all retry attempts.");
     }
 
     /// <summary>

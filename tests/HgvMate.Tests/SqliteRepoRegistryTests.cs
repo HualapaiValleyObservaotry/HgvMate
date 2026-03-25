@@ -241,9 +241,14 @@ public sealed class SqliteRepoRegistryTests
     [TestMethod]
     public async Task DatabaseInitializer_MigratesExistingDatabase()
     {
-        // Simulate a legacy database without the new columns
+        // Create a fresh in-memory database with only the legacy schema (no new columns)
+        var legacyId = Interlocked.Increment(ref _dbCounter);
+        var legacyConnStr = $"Data Source=legacydb{legacyId};Mode=Memory;Cache=Shared";
+        using var legacyKeepAlive = new SqliteConnection(legacyConnStr);
+        await legacyKeepAlive.OpenAsync();
+
         var legacySql = """
-            CREATE TABLE IF NOT EXISTS repositories (
+            CREATE TABLE repositories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
                 url TEXT NOT NULL,
@@ -255,11 +260,40 @@ public sealed class SqliteRepoRegistryTests
                 added_by TEXT
             );
             """;
-        using var legacyCmd = new SqliteCommand(legacySql, _keepAlive);
-        // Table already exists from Setup, so just test that migration doesn't throw
-        // by running the initializer on an already-migrated DB
-        var initializer = new DatabaseInitializer(_factory, Microsoft.Extensions.Logging.Abstractions.NullLogger<DatabaseInitializer>.Instance);
-        await initializer.InitializeAsync(); // Should be idempotent
+        using var legacyCmd = new SqliteCommand(legacySql, legacyKeepAlive);
+        await legacyCmd.ExecuteNonQueryAsync();
+
+        // Insert a row into the legacy table to ensure migration preserves data
+        using var insertCmd = new SqliteCommand(
+            "INSERT INTO repositories (name, url) VALUES ('legacy-repo', 'https://example.com/r.git');",
+            legacyKeepAlive);
+        await insertCmd.ExecuteNonQueryAsync();
+
+        // Run the initializer — should add the missing columns without error
+        var legacyFactory = new InMemoryConnectionFactory(legacyConnStr);
+        var initializer = new DatabaseInitializer(legacyFactory,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        // Verify the new columns exist and the existing row has defaults
+        using var checkCmd = new SqliteCommand(
+            "SELECT sync_state, failed_sync_count, last_error FROM repositories WHERE name='legacy-repo';",
+            legacyKeepAlive);
+        using var reader = await checkCmd.ExecuteReaderAsync();
+        Assert.IsTrue(await reader.ReadAsync(), "Row should still exist after migration.");
+        Assert.AreEqual("pending", reader.IsDBNull(0) ? "pending" : reader.GetString(0));
+        Assert.AreEqual(0, reader.IsDBNull(1) ? 0 : reader.GetInt32(1));
+        Assert.IsTrue(reader.IsDBNull(2), "last_error should be NULL for the legacy row.");
+    }
+
+    [TestMethod]
+    public async Task DatabaseInitializer_IsIdempotent_WhenRunTwice()
+    {
+        // Running initializer on an already-migrated DB should not throw
+        var initializer = new DatabaseInitializer(_factory,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+        await initializer.InitializeAsync(); // second call should be safe
     }
 
     private sealed class InMemoryConnectionFactory : ISqliteConnectionFactory
