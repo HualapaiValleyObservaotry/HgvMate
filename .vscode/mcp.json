@@ -2,7 +2,7 @@
   "servers": {
     "hgvmate-sse": {
       "type": "http",
-      "url": "http://20.252.67.128:5000/mcp"
+      "url": "http://hgvmate.westus2.azurecontainer.io:5000/mcp"
     }
   }
 }
