@@ -16,10 +16,6 @@
         "-v", "${env:HOME}/.hgvmate/data:/data",
         "hgvmate"
       ]
-    },
-    "hgvmate-remote": {
-      "type": "sse",
-      "url": "http://localhost:5000/sse"
     }
   }
 }

@@ -84,19 +84,27 @@ public class RepoSyncService : BackgroundService
             }
 
             var newSha = await GetCurrentShaAsync(clonePath, cancellationToken);
-            if (!string.IsNullOrEmpty(newSha))
-                await _registry.UpdateLastShaAsync(repo.Name, newSha);
+
+            if (string.IsNullOrEmpty(newSha))
+            {
+                _logger.LogWarning("Could not determine HEAD SHA for repo '{Name}'. Falling back to full re-index.", repo.Name);
+                await _indexingService.IndexRepoAsync(repo.Name, cancellationToken);
+                await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
+                await _registry.UpdateLastSyncedAsync(repo.Name, DateTime.UtcNow);
+                return;
+            }
 
             await _registry.UpdateLastSyncedAsync(repo.Name, DateTime.UtcNow);
-            _logger.LogInformation("Repo '{Name}' synced successfully (SHA: {Sha}).", repo.Name, newSha ?? "unknown");
+            _logger.LogInformation("Repo '{Name}' synced successfully (SHA: {Sha}).", repo.Name, newSha);
 
             if (isFirstSync || string.IsNullOrEmpty(oldSha))
             {
                 // First sync: full index
                 await _indexingService.IndexRepoAsync(repo.Name, cancellationToken);
                 await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
+                await _registry.UpdateLastShaAsync(repo.Name, newSha);
             }
-            else if (oldSha != newSha && !string.IsNullOrEmpty(newSha))
+            else if (oldSha != newSha)
             {
                 // Changes detected: try incremental re-index
                 var changedFiles = await GetChangedFilesAsync(clonePath, oldSha, newSha, cancellationToken);
@@ -117,6 +125,7 @@ public class RepoSyncService : BackgroundService
                     await _indexingService.IndexRepoAsync(repo.Name, cancellationToken);
                     await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
                 }
+                await _registry.UpdateLastShaAsync(repo.Name, newSha);
             }
             else
             {

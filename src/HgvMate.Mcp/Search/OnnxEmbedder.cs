@@ -158,7 +158,7 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
     // all-MiniLM-L6-v2 has a vocabulary size of 30,522 (standard BERT uncased).
     private const int VocabSize = 30522;
 
-    private static long[] SimpleTokenize(string text)
+    internal static long[] SimpleTokenize(string text)
     {
         var words = text.Split([' ', '\n', '\r', '\t', '.', ',', '(', ')', '{', '}', ';'],
             StringSplitOptions.RemoveEmptyEntries);

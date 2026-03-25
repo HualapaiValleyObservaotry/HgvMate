@@ -87,12 +87,18 @@ public class IndexingService
     {
         if (!_embedder.IsAvailable) return;
 
+        // Always delete old chunks first — handles deleted files and renames
+        await _vectorStore.DeleteChunksForFileAsync(repoName, relativePath);
+
         var repoRoot = _reader.GetRepoRoot(repoName);
         var fullPath = Path.Combine(repoRoot, relativePath);
 
+        // Skip non-indexable files (same filter as full IndexRepoAsync)
+        if (!IsIndexableFile(fullPath)) return;
+
+        // File was deleted — chunks already removed above
         if (!File.Exists(fullPath)) return;
 
-        await _vectorStore.DeleteChunksForFileAsync(repoName, relativePath);
         var content = await File.ReadAllTextAsync(fullPath, cancellationToken);
         var chunks = ChunkText(content);
         var sourceChunks = new List<SourceChunk>();
@@ -139,14 +145,19 @@ public class IndexingService
         return chunks.Where(c => !string.IsNullOrWhiteSpace(c)).ToList();
     }
 
+    internal static bool IsIndexableFile(string filePath)
+    {
+        if (!TextExtensions.Contains(Path.GetExtension(filePath).ToLowerInvariant()))
+            return false;
+
+        var sep = Path.DirectorySeparatorChar;
+        string[] excludedDirs = [".git", ".gitnexus", "node_modules", "bin", "obj"];
+        return !excludedDirs.Any(d => filePath.Contains(sep + d + sep));
+    }
+
     private static IEnumerable<string> GetIndexableFiles(string root)
     {
         return Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
-            .Where(f => TextExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
-            .Where(f => !f.Contains(Path.DirectorySeparatorChar + ".git" + Path.DirectorySeparatorChar))
-            .Where(f => !f.Contains(Path.DirectorySeparatorChar + ".gitnexus" + Path.DirectorySeparatorChar))
-            .Where(f => !f.Contains(Path.DirectorySeparatorChar + "node_modules" + Path.DirectorySeparatorChar))
-            .Where(f => !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar))
-            .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar));
+            .Where(IsIndexableFile);
     }
 }

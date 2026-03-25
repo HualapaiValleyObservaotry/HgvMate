@@ -12,6 +12,7 @@ public sealed class RepoSyncServiceTests
 {
     private string _tempDir = null!;
     private static int _counter;
+    private readonly List<SqliteConnection> _connections = [];
 
     [TestInitialize]
     public void Setup()
@@ -23,13 +24,17 @@ public sealed class RepoSyncServiceTests
     [TestCleanup]
     public void Cleanup()
     {
+        foreach (var conn in _connections)
+            conn.Dispose();
+        _connections.Clear();
+
         if (Directory.Exists(_tempDir))
             Directory.Delete(_tempDir, recursive: true);
     }
 
     // ─── helpers ────────────────────────────────────────────────────────────
 
-    private static (RepoSyncService service, TrackingIndexingService indexing, TrackingRegistry registry)
+    private (RepoSyncService service, TrackingIndexingService indexing, TrackingRegistry registry)
         BuildService(string tempDir, Dictionary<string[], (string output, int exit)>? gitResponses = null)
     {
         var hgvOptions = new HgvMateOptions { DataPath = tempDir };
@@ -42,7 +47,8 @@ public sealed class RepoSyncServiceTests
         var id = System.Threading.Interlocked.Increment(ref _counter);
         var connStr = $"Data Source=rsstest{id};Mode=Memory;Cache=Shared";
         var conn = new SqliteConnection(connStr);
-        conn.Open(); // keep alive for the test lifetime
+        conn.Open();
+        _connections.Add(conn); // disposed in TestCleanup
         var factory = new TestConnFactory(connStr);
         var vectorStore = new VectorStore(factory, NullLogger<VectorStore>.Instance);
         vectorStore.EnsureSchemaAsync().GetAwaiter().GetResult();
@@ -253,6 +259,65 @@ public sealed class RepoSyncServiceTests
 
         // Should not throw — errors are caught and logged
         await svc.SyncRepoAsync(repo);
+    }
+
+    // ─── Regression: UpdateLastSha ordering ──────────────────────────────────
+
+    [TestMethod]
+    public async Task SyncRepoAsync_UpdatesShaAfterIndexing_NotBefore()
+    {
+        const string oldSha = "aabbcc";
+        const string newSha = "ddeeff";
+        var repo = new RepoRecord(1, "myrepo", "https://example.com/r.git", "main", "github", true, oldSha, null, null);
+
+        var clonePath = Path.Combine(_tempDir, "repos", "myrepo");
+        Directory.CreateDirectory(Path.Combine(clonePath, ".git"));
+
+        var responses = new Dictionary<string[], (string, int)>(StringArrayComparer.Instance)
+        {
+            { ["fetch", "--depth", "1", "origin", "main"], ("", 0) },
+            { ["reset", "--hard", "origin/main"], ("", 0) },
+            { ["rev-parse", "HEAD"], (newSha + "\n", 0) },
+            { ["diff", "--name-only", $"{oldSha}..{newSha}"], ("src/Changed.cs\n", 0) }
+        };
+
+        var (svc, indexing, registry) = BuildService(_tempDir, responses);
+
+        await svc.SyncRepoAsync(repo);
+
+        // SHA should be updated only after indexing completes
+        Assert.IsTrue(registry.LastShaUpdates.ContainsKey("myrepo"), "SHA should be updated after sync.");
+        Assert.AreEqual(newSha, registry.LastShaUpdates["myrepo"]);
+        Assert.IsTrue(indexing.IndexFileCalls > 0 || indexing.IndexRepoCalls > 0,
+            "Indexing should have been called before SHA update.");
+    }
+
+    // ─── Regression: empty SHA handling ──────────────────────────────────────
+
+    [TestMethod]
+    public async Task SyncRepoAsync_FallsBackToFullIndex_WhenShaIsEmpty()
+    {
+        var repo = new RepoRecord(1, "emptysha", "https://example.com/r.git", "main", "github", true, "oldsha", null, null);
+
+        var clonePath = Path.Combine(_tempDir, "repos", "emptysha");
+        Directory.CreateDirectory(Path.Combine(clonePath, ".git"));
+
+        // rev-parse returns empty (simulating failure)
+        var responses = new Dictionary<string[], (string, int)>(StringArrayComparer.Instance)
+        {
+            { ["fetch", "--depth", "1", "origin", "main"], ("", 0) },
+            { ["reset", "--hard", "origin/main"], ("", 0) },
+            { ["rev-parse", "HEAD"], ("\n", 0) }
+        };
+
+        var (svc, indexing, registry) = BuildService(_tempDir, responses);
+
+        await svc.SyncRepoAsync(repo);
+
+        // Should trigger full re-index as fallback when SHA is empty
+        Assert.AreEqual(1, indexing.IndexRepoCalls, "Should fall back to full re-index when SHA is empty.");
+        Assert.IsFalse(registry.LastShaUpdates.ContainsKey("emptysha"),
+            "Should NOT update SHA when it could not be determined.");
     }
 
     // ─── Inner test helpers ──────────────────────────────────────────────────

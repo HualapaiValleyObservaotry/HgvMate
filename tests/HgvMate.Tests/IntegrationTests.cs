@@ -61,7 +61,7 @@ public sealed class IntegrationTests
         // Create a bare clone so we can clone from it
         RunGit(_tempDir, $"clone --bare {workDir} origin.git");
 
-        var repoUrl = $"file://{originDir}";
+        var repoUrl = new Uri(originDir).AbsoluteUri;
 
         // ── 2. Wire up services ────────────────────────────────────────────
         var hgvOptions = new HgvMateOptions { DataPath = _tempDir };
@@ -128,7 +128,7 @@ public sealed class IntegrationTests
         RunGit(_tempDir, $"clone --bare {workDir} origin2.git");
 
         var originDir = Path.Combine(_tempDir, "origin2.git");
-        var repoUrl = $"file://{originDir}";
+        var repoUrl = new Uri(originDir).AbsoluteUri;
 
         // ── 2. Wire up services ────────────────────────────────────────────
         var hgvOptions = new HgvMateOptions { DataPath = _tempDir };
@@ -205,7 +205,21 @@ public sealed class IntegrationTests
             RedirectStandardError = true,
             UseShellExecute = false
         }) ?? throw new InvalidOperationException("Failed to start git");
-        p.WaitForExit(30_000);
+
+        var exited = p.WaitForExit(30_000);
+        if (!exited)
+        {
+            try { p.Kill(entireProcessTree: true); } catch { }
+            throw new TimeoutException(
+                $"git command timed out after 30s. WorkingDirectory='{workingDir}', Arguments='{args}'");
+        }
+
+        if (p.ExitCode != 0)
+        {
+            var stderr = p.StandardError.ReadToEnd();
+            throw new InvalidOperationException(
+                $"git {args} failed with exit code {p.ExitCode}. WorkingDirectory='{workingDir}'. Stderr: {stderr}");
+        }
     }
 
     private sealed class SharedConnFactory : ISqliteConnectionFactory

@@ -60,4 +60,35 @@ public sealed class IndexingServiceTests
         public TestConnectionFactory(string connStr) => _connStr = connStr;
         public SqliteConnection CreateConnection() => new SqliteConnection(_connStr);
     }
+
+    // ─── IsIndexableFile regression tests ────────────────────────────────────
+
+    [TestMethod]
+    public void IsIndexableFile_AcceptsSourceCodeExtensions()
+    {
+        Assert.IsTrue(IndexingService.IsIndexableFile("/repo/src/Foo.cs"));
+        Assert.IsTrue(IndexingService.IsIndexableFile("/repo/src/app.ts"));
+        Assert.IsTrue(IndexingService.IsIndexableFile("/repo/README.md"));
+        Assert.IsTrue(IndexingService.IsIndexableFile("/repo/config.json"));
+    }
+
+    [TestMethod]
+    public void IsIndexableFile_RejectsNonSourceFiles()
+    {
+        Assert.IsFalse(IndexingService.IsIndexableFile("/repo/image.png"));
+        Assert.IsFalse(IndexingService.IsIndexableFile("/repo/archive.zip"));
+        Assert.IsFalse(IndexingService.IsIndexableFile("/repo/binary.dll"));
+        Assert.IsFalse(IndexingService.IsIndexableFile("/repo/font.woff2"));
+    }
+
+    [TestMethod]
+    public void IsIndexableFile_RejectsExcludedDirectories()
+    {
+        var sep = Path.DirectorySeparatorChar;
+        Assert.IsFalse(IndexingService.IsIndexableFile($"/repo{sep}.git{sep}config"));
+        Assert.IsFalse(IndexingService.IsIndexableFile($"/repo{sep}node_modules{sep}lodash{sep}index.js"));
+        Assert.IsFalse(IndexingService.IsIndexableFile($"/repo{sep}bin{sep}Debug{sep}app.cs"));
+        Assert.IsFalse(IndexingService.IsIndexableFile($"/repo{sep}obj{sep}project.assets.json"));
+        Assert.IsFalse(IndexingService.IsIndexableFile($"/repo{sep}.gitnexus{sep}index.json"));
+    }
 }
