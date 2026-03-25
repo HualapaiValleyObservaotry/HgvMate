@@ -131,6 +131,8 @@ public sealed class SseTransportTests : IDisposable
         builder.Services.AddSingleton<DatabaseInitializer>();
         builder.Services.AddSingleton<IGitCredentialProvider, GitCredentialProvider>();
         builder.Services.AddSingleton<IRepoRegistry, SqliteRepoRegistry>();
+        var startupState = new StartupState();
+        builder.Services.AddSingleton(startupState);
         builder.Services.AddSingleton<RepoSyncService>();
         builder.Services.AddSingleton<SourceCodeReader>();
         builder.Services.AddSingleton<GitGrepSearchService>();
@@ -154,6 +156,10 @@ public sealed class SseTransportTests : IDisposable
 
         var vectorStore = app.Services.GetRequiredService<VectorStore>();
         await vectorStore.EnsureSchemaAsync();
+
+        startupState.MarkDatabaseReady();
+        startupState.MarkVectorCacheReady();
+        startupState.MarkOnnxReady();
 
         app.MapMcp("/mcp");
 

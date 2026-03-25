@@ -13,6 +13,7 @@ public class RepoSyncService : BackgroundService
     private readonly RepoSyncOptions _syncOptions;
     private readonly IndexingService _indexingService;
     private readonly GitNexusService _gitNexusService;
+    private readonly StartupState _startupState;
     private readonly ILogger<RepoSyncService> _logger;
 
     // Limit concurrent syncs to prevent OOM from unbounded parallel git clones + ONNX indexing
@@ -27,6 +28,7 @@ public class RepoSyncService : BackgroundService
         RepoSyncOptions syncOptions,
         IndexingService indexingService,
         GitNexusService gitNexusService,
+        StartupState startupState,
         ILogger<RepoSyncService> logger)
     {
         _registry = registry;
@@ -35,6 +37,7 @@ public class RepoSyncService : BackgroundService
         _syncOptions = syncOptions;
         _indexingService = indexingService;
         _gitNexusService = gitNexusService;
+        _startupState = startupState;
         _logger = logger;
     }
 
@@ -43,6 +46,14 @@ public class RepoSyncService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Yield immediately so the host can finish starting (Kestrel begins accepting requests)
+        await Task.Yield();
+
+        // Wait for data stores to be initialized by WarmupService
+        _logger.LogInformation("RepoSyncService waiting for warmup to complete...");
+        while (!_startupState.IsReady && !stoppingToken.IsCancellationRequested)
+            await Task.Delay(500, stoppingToken);
+
         _logger.LogInformation("RepoSyncService starting...");
         await SyncAllAsync(stoppingToken);
 

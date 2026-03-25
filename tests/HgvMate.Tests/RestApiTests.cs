@@ -50,6 +50,21 @@ public sealed class RestApiTests : IDisposable
     }
 
     [TestMethod]
+    public async Task Health_ReturnsStartingStatus_WhenWarmupNotComplete()
+    {
+        await using var app = await CreateTestApp(markReady: false);
+        var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/health");
+
+        Assert.AreEqual(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.AreEqual("starting", body.GetProperty("status").GetString());
+        Assert.IsTrue(body.TryGetProperty("warmup", out var warmup));
+        Assert.IsFalse(warmup.GetProperty("vectorCache").GetBoolean());
+    }
+
+    [TestMethod]
     public async Task Health_ReturnsStatusAndRepoDetails()
     {
         await using var app = await CreateTestApp();
@@ -250,7 +265,7 @@ public sealed class RestApiTests : IDisposable
 
     // ── Test app factory ────────────────────────────────────────────────
 
-    private async Task<WebApplication> CreateTestApp()
+    private async Task<WebApplication> CreateTestApp(bool markReady = true)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
@@ -270,6 +285,8 @@ public sealed class RestApiTests : IDisposable
         builder.Services.AddSingleton<DatabaseInitializer>();
         builder.Services.AddSingleton<IGitCredentialProvider, GitCredentialProvider>();
         builder.Services.AddSingleton<IRepoRegistry, SqliteRepoRegistry>();
+        var startupState = new StartupState();
+        builder.Services.AddSingleton(startupState);
         builder.Services.AddSingleton<RepoSyncService>();
         builder.Services.AddSingleton<SourceCodeReader>();
         builder.Services.AddSingleton<GitGrepSearchService>();
@@ -294,6 +311,13 @@ public sealed class RestApiTests : IDisposable
         await dbInit.InitializeAsync();
         var vectorStore = app.Services.GetRequiredService<VectorStore>();
         await vectorStore.EnsureSchemaAsync();
+
+        startupState.MarkDatabaseReady();
+        if (markReady)
+        {
+            startupState.MarkVectorCacheReady();
+            startupState.MarkOnnxReady();
+        }
 
         app.MapOpenApi();
         app.MapScalarApiReference();

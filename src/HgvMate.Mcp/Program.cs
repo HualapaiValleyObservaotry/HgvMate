@@ -1,4 +1,5 @@
-﻿using HgvMate.Mcp.Api;
+﻿using HgvMate.Mcp;
+using HgvMate.Mcp.Api;
 using HgvMate.Mcp.Configuration;
 using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
@@ -40,8 +41,6 @@ if (useSse)
         .WithTools<StructuralTools>();
 
     var app = builder.Build();
-
-    await InitializeDataStores(app.Services);
 
     app.UseForwardedHeaders(new ForwardedHeadersOptions
     {
@@ -104,8 +103,6 @@ else
 
     var app = builder.Build();
 
-    await InitializeDataStores(app.Services);
-
     await app.RunAsync();
 }
 
@@ -149,6 +146,9 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
     services.AddSingleton<DatabaseInitializer>();
     services.AddSingleton<IGitCredentialProvider, GitCredentialProvider>();
 
+    services.AddSingleton<StartupState>();
+    services.AddHostedService<WarmupService>();
+
     services.AddSingleton<IRepoRegistry, SqliteRepoRegistry>();
     services.AddSingleton<RepoSyncService>();
     services.AddHostedService<RepoSyncService>(sp => sp.GetRequiredService<RepoSyncService>());
@@ -162,11 +162,4 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
     services.AddSingleton<HybridSearchService>();
 }
 
-static async Task InitializeDataStores(IServiceProvider services)
-{
-    var dbInit = services.GetRequiredService<DatabaseInitializer>();
-    await dbInit.InitializeAsync();
 
-    var vectorStore = services.GetRequiredService<VectorStore>();
-    await vectorStore.EnsureSchemaAsync();
-}

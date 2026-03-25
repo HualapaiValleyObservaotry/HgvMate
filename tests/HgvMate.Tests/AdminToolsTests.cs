@@ -184,6 +184,7 @@ public sealed class AdminToolsTests
                    new RepoSyncOptions(),
                    CreateIndexingService(),
                    CreateGitNexusService(),
+                   new StartupState(),
                    NullLogger<RepoSyncService>.Instance)
         {
         }

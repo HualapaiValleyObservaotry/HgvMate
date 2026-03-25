@@ -29,9 +29,25 @@ public static class ApiEndpoints
             IRepoRegistry registry,
             VectorStore vectorStore,
             IOnnxEmbedder embedder,
+            StartupState startupState,
             HgvMateOptions hgvMateOptions,
             RepoSyncOptions syncOptions) =>
         {
+            if (!startupState.IsReady)
+            {
+                return Results.Json(new
+                {
+                    Status = "starting",
+                    Uptime = (DateTime.UtcNow - _startTime).ToString(@"d\.hh\:mm\:ss"),
+                    Warmup = new
+                    {
+                        Database = startupState.DatabaseReady,
+                        VectorCache = startupState.VectorCacheReady,
+                        Onnx = startupState.OnnxReady
+                    }
+                }, statusCode: 503);
+            }
+
             var repos = await registry.GetAllAsync();
             var chunkCounts = await vectorStore.GetChunkCountsAsync();
 
