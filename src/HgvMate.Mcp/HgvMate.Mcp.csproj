@@ -7,4 +7,26 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" Version="0.3.0-preview.1" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="0.3.0-preview.1" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.3" />
+    <PackageReference Include="Azure.Identity" Version="1.13.2" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.3" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.24.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>HgvMate.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>
