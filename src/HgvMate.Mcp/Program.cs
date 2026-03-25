@@ -1,4 +1,5 @@
-﻿using HgvMate.Mcp.Configuration;
+﻿using HgvMate.Mcp.Api;
+using HgvMate.Mcp.Configuration;
 using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
@@ -7,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Scalar.AspNetCore;
 
 // ── Determine transport before building the host ────────────────────────────
 var preConfig = new ConfigurationBuilder()
@@ -28,6 +30,8 @@ if (useSse)
 
     ConfigureServices(builder.Services, builder.Configuration, transport);
 
+    builder.Services.AddOpenApi();
+
     builder.Services.AddMcpServer()
         .WithHttpTransport()
         .WithTools<AdminTools>()
@@ -38,7 +42,10 @@ if (useSse)
 
     await InitializeDataStores(app.Services);
 
+    app.MapOpenApi();
+    app.MapScalarApiReference();
     app.MapMcp("/mcp");
+    app.MapRestApi();
 
     await app.RunAsync();
 }
