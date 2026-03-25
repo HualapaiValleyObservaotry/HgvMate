@@ -7,3 +7,4 @@ appsettings.Development.json
 bin/
 obj/
 .data/
+add-repos.sh
