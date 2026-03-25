@@ -8,70 +8,117 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-var builder = Host.CreateApplicationBuilder(args);
+// ── Determine transport before building the host ────────────────────────────
+var preConfig = new ConfigurationBuilder()
+    .AddJsonFile("appsettings.json", optional: true)
+    .AddEnvironmentVariables()
+    .Build();
 
-// Redirect all console logging to stderr so stdout is reserved for MCP JSON-RPC messages
-builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
+var transport = Environment.GetEnvironmentVariable("HGVMATE_TRANSPORT")
+    ?? preConfig.GetSection("HgvMate")["Transport"]
+    ?? "stdio";
 
-// Configuration
-var hgvMateOptions = new HgvMateOptions();
-builder.Configuration.GetSection(HgvMateOptions.SectionName).Bind(hgvMateOptions);
+var useSse = transport.Equals("sse", StringComparison.OrdinalIgnoreCase)
+          || transport.Equals("http", StringComparison.OrdinalIgnoreCase);
 
-var dataPath = Environment.GetEnvironmentVariable("HGVMATE_DATA_PATH") ?? hgvMateOptions.DataPath;
-hgvMateOptions.DataPath = dataPath;
+if (useSse)
+{
+    // ── SSE / Streamable HTTP transport ─────────────────────────────────
+    var builder = WebApplication.CreateBuilder(args);
 
-var transport = Environment.GetEnvironmentVariable("HGVMATE_TRANSPORT") ?? hgvMateOptions.Transport;
-hgvMateOptions.Transport = transport;
+    ConfigureServices(builder.Services, builder.Configuration, transport);
 
-var repoSyncOptions = new RepoSyncOptions();
-builder.Configuration.GetSection(RepoSyncOptions.SectionName).Bind(repoSyncOptions);
+    builder.Services.AddMcpServer()
+        .WithHttpTransport()
+        .WithTools<AdminTools>()
+        .WithTools<SourceCodeTools>()
+        .WithTools<StructuralTools>();
 
-var searchOptions = new SearchOptions();
-builder.Configuration.GetSection(SearchOptions.SectionName).Bind(searchOptions);
+    var app = builder.Build();
 
-var credentialOptions = new CredentialOptions();
-builder.Configuration.GetSection(CredentialOptions.SectionName).Bind(credentialOptions);
+    await InitializeDataStores(app.Services);
 
-Directory.CreateDirectory(dataPath);
-Directory.CreateDirectory(Path.Combine(dataPath, repoSyncOptions.ClonePath));
+    app.MapMcp("/mcp");
 
-var dbPath = Path.Combine(dataPath, "hgvmate.db");
-var connectionString = $"Data Source={dbPath}";
+    await app.RunAsync();
+}
+else
+{
+    // ── stdio transport (default) ───────────────────────────────────────
+    var builder = Host.CreateApplicationBuilder(args);
 
-builder.Services.AddSingleton(hgvMateOptions);
-builder.Services.AddSingleton(repoSyncOptions);
-builder.Services.AddSingleton(searchOptions);
-builder.Services.AddSingleton(credentialOptions);
+    // Redirect all console logging to stderr so stdout is reserved for MCP JSON-RPC messages
+    builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
 
-builder.Services.AddSingleton<ISqliteConnectionFactory>(sp =>
-    new SqliteConnectionFactory(connectionString, sp.GetRequiredService<ILogger<SqliteConnectionFactory>>()));
-builder.Services.AddSingleton<DatabaseInitializer>();
-builder.Services.AddSingleton<IGitCredentialProvider, GitCredentialProvider>();
+    ConfigureServices(builder.Services, builder.Configuration, transport);
 
-builder.Services.AddSingleton<IRepoRegistry, SqliteRepoRegistry>();
-builder.Services.AddSingleton<RepoSyncService>();
-builder.Services.AddHostedService<RepoSyncService>(sp => sp.GetRequiredService<RepoSyncService>());
+    builder.Services.AddMcpServer()
+        .WithStdioServerTransport()
+        .WithTools<AdminTools>()
+        .WithTools<SourceCodeTools>()
+        .WithTools<StructuralTools>();
 
-builder.Services.AddSingleton<SourceCodeReader>();
-builder.Services.AddSingleton<GitGrepSearchService>();
-builder.Services.AddSingleton<GitNexusService>();
-builder.Services.AddSingleton<IOnnxEmbedder, OnnxEmbedder>();
-builder.Services.AddSingleton<VectorStore>();
-builder.Services.AddSingleton<IndexingService>();
-builder.Services.AddSingleton<HybridSearchService>();
+    var app = builder.Build();
 
-builder.Services.AddMcpServer()
-    .WithStdioServerTransport()
-    .WithTools<AdminTools>()
-    .WithTools<SourceCodeTools>()
-    .WithTools<StructuralTools>();
+    await InitializeDataStores(app.Services);
 
-var app = builder.Build();
+    await app.RunAsync();
+}
 
-var dbInit = app.Services.GetRequiredService<DatabaseInitializer>();
-await dbInit.InitializeAsync();
+// ── Shared service registration ─────────────────────────────────────────────
 
-var vectorStore = app.Services.GetRequiredService<VectorStore>();
-await vectorStore.EnsureSchemaAsync();
+static void ConfigureServices(IServiceCollection services, IConfiguration configuration, string transport)
+{
+    var hgvMateOptions = new HgvMateOptions();
+    configuration.GetSection(HgvMateOptions.SectionName).Bind(hgvMateOptions);
 
-await app.RunAsync();
+    var dataPath = Environment.GetEnvironmentVariable("HGVMATE_DATA_PATH") ?? hgvMateOptions.DataPath;
+    hgvMateOptions.DataPath = dataPath;
+    hgvMateOptions.Transport = transport;
+
+    var repoSyncOptions = new RepoSyncOptions();
+    configuration.GetSection(RepoSyncOptions.SectionName).Bind(repoSyncOptions);
+
+    var searchOptions = new SearchOptions();
+    configuration.GetSection(SearchOptions.SectionName).Bind(searchOptions);
+
+    var credentialOptions = new CredentialOptions();
+    configuration.GetSection(CredentialOptions.SectionName).Bind(credentialOptions);
+
+    Directory.CreateDirectory(dataPath);
+    Directory.CreateDirectory(Path.Combine(dataPath, repoSyncOptions.ClonePath));
+
+    var dbPath = Path.Combine(dataPath, "hgvmate.db");
+    var connectionString = $"Data Source={dbPath}";
+
+    services.AddSingleton(hgvMateOptions);
+    services.AddSingleton(repoSyncOptions);
+    services.AddSingleton(searchOptions);
+    services.AddSingleton(credentialOptions);
+
+    services.AddSingleton<ISqliteConnectionFactory>(sp =>
+        new SqliteConnectionFactory(connectionString, sp.GetRequiredService<ILogger<SqliteConnectionFactory>>()));
+    services.AddSingleton<DatabaseInitializer>();
+    services.AddSingleton<IGitCredentialProvider, GitCredentialProvider>();
+
+    services.AddSingleton<IRepoRegistry, SqliteRepoRegistry>();
+    services.AddSingleton<RepoSyncService>();
+    services.AddHostedService<RepoSyncService>(sp => sp.GetRequiredService<RepoSyncService>());
+
+    services.AddSingleton<SourceCodeReader>();
+    services.AddSingleton<GitGrepSearchService>();
+    services.AddSingleton<GitNexusService>();
+    services.AddSingleton<IOnnxEmbedder, OnnxEmbedder>();
+    services.AddSingleton<VectorStore>();
+    services.AddSingleton<IndexingService>();
+    services.AddSingleton<HybridSearchService>();
+}
+
+static async Task InitializeDataStores(IServiceProvider services)
+{
+    var dbInit = services.GetRequiredService<DatabaseInitializer>();
+    await dbInit.InitializeAsync();
+
+    var vectorStore = services.GetRequiredService<VectorStore>();
+    await vectorStore.EnsureSchemaAsync();
+}

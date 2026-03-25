@@ -16,6 +16,11 @@
         "-v", "${env:HOME}/.hgvmate/data:/data",
         "hgvmate"
       ]
+    },
+    "hgvmate-sse": {
+      "type": "http",
+      "url": "http://localhost:5000/mcp",
+      "headers": {}
     }
   }
 }

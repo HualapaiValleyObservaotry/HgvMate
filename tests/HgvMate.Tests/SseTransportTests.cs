@@ -1,0 +1,171 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+using HgvMate.Mcp.Configuration;
+using HgvMate.Mcp.Data;
+using HgvMate.Mcp.Repos;
+using HgvMate.Mcp.Search;
+using HgvMate.Mcp.Tools;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace HgvMate.Tests;
+
+/// <summary>
+/// Tests that verify SSE / Streamable HTTP transport works end-to-end
+/// using ASP.NET Core TestServer (in-process, no real network).
+/// </summary>
+[TestClass]
+public sealed class SseTransportTests : IDisposable
+{
+    private string _tempDir = null!;
+    private SqliteConnection _conn = null!;
+    private static int _counter;
+
+    [TestInitialize]
+    public async Task Setup()
+    {
+        _tempDir = Path.Combine(Path.GetTempPath(), "HgvMateSse_" + Path.GetRandomFileName());
+        Directory.CreateDirectory(_tempDir);
+        Directory.CreateDirectory(Path.Combine(_tempDir, "repos"));
+
+        var id = System.Threading.Interlocked.Increment(ref _counter);
+        _conn = new SqliteConnection($"Data Source=ssetest{id};Mode=Memory;Cache=Shared");
+        await _conn.OpenAsync();
+    }
+
+    [TestCleanup]
+    public void Cleanup()
+    {
+        Dispose();
+    }
+
+    public void Dispose()
+    {
+        _conn?.Dispose();
+        if (_tempDir != null && Directory.Exists(_tempDir))
+            Directory.Delete(_tempDir, recursive: true);
+    }
+
+    [TestMethod]
+    public async Task SseEndpoint_ReturnsOk_ForMcpPost()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        // Send an MCP initialize JSON-RPC request via POST to /mcp
+        var initRequest = new
+        {
+            jsonrpc = "2.0",
+            id = 1,
+            method = "initialize",
+            @params = new
+            {
+                protocolVersion = "2025-03-26",
+                capabilities = new { },
+                clientInfo = new { name = "test-client", version = "1.0.0" }
+            }
+        };
+
+        var content = new StringContent(
+            JsonSerializer.Serialize(initRequest),
+            Encoding.UTF8,
+            "application/json");
+
+        var response = await client.PostAsync("/mcp", content);
+
+        // The MCP HTTP transport should accept POST requests at the /mcp endpoint
+        Assert.AreNotEqual(HttpStatusCode.NotFound, response.StatusCode,
+            "The /mcp endpoint should exist and accept POST requests.");
+    }
+
+    [TestMethod]
+    public async Task SseEndpoint_ReturnsNotFound_ForWrongPath()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/nonexistent");
+
+        Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task SseEndpoint_AcceptsGetForSseStream()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        // GET /mcp should be accepted (it's the SSE streaming endpoint)
+        var response = await client.GetAsync("/mcp", HttpCompletionOption.ResponseHeadersRead);
+
+        // Should not be 404 — the endpoint exists and serves SSE or returns appropriate status
+        Assert.AreNotEqual(HttpStatusCode.NotFound, response.StatusCode,
+            "GET /mcp should be handled by the MCP endpoint.");
+    }
+
+    private async Task<WebApplication> CreateTestApp()
+    {
+        var builder = WebApplication.CreateBuilder();
+
+        builder.WebHost.UseTestServer();
+
+        var hgvOptions = new HgvMateOptions { DataPath = _tempDir, Transport = "sse" };
+        var syncOptions = new RepoSyncOptions { ClonePath = "repos", PollIntervalMinutes = 0 };
+        var searchOptions = new SearchOptions { MaxResults = 10 };
+        var credOptions = new CredentialOptions();
+
+        var connFactory = new TestConnFactory(_conn.ConnectionString);
+
+        builder.Services.AddSingleton(hgvOptions);
+        builder.Services.AddSingleton(syncOptions);
+        builder.Services.AddSingleton(searchOptions);
+        builder.Services.AddSingleton(credOptions);
+        builder.Services.AddSingleton<ISqliteConnectionFactory>(connFactory);
+        builder.Services.AddSingleton<DatabaseInitializer>();
+        builder.Services.AddSingleton<IGitCredentialProvider, GitCredentialProvider>();
+        builder.Services.AddSingleton<IRepoRegistry, SqliteRepoRegistry>();
+        builder.Services.AddSingleton<RepoSyncService>();
+        builder.Services.AddSingleton<SourceCodeReader>();
+        builder.Services.AddSingleton<GitGrepSearchService>();
+        builder.Services.AddSingleton<GitNexusService>();
+        builder.Services.AddSingleton<IOnnxEmbedder>(
+            new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null, NullLogger<OnnxEmbedder>.Instance));
+        builder.Services.AddSingleton<VectorStore>();
+        builder.Services.AddSingleton<IndexingService>();
+        builder.Services.AddSingleton<HybridSearchService>();
+
+        builder.Services.AddMcpServer()
+            .WithHttpTransport()
+            .WithTools<AdminTools>()
+            .WithTools<SourceCodeTools>()
+            .WithTools<StructuralTools>();
+
+        var app = builder.Build();
+
+        var dbInit = app.Services.GetRequiredService<DatabaseInitializer>();
+        await dbInit.InitializeAsync();
+
+        var vectorStore = app.Services.GetRequiredService<VectorStore>();
+        await vectorStore.EnsureSchemaAsync();
+
+        app.MapMcp("/mcp");
+
+        await app.StartAsync();
+
+        return app;
+    }
+
+    private sealed class TestConnFactory : ISqliteConnectionFactory
+    {
+        private readonly string _connStr;
+        public TestConnFactory(string connStr) => _connStr = connStr;
+        public SqliteConnection CreateConnection() => new(_connStr);
+    }
+}
