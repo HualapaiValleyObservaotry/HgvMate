@@ -1,3 +1,4 @@
+using HgvMate.Mcp.Configuration;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -6,15 +7,94 @@ namespace HgvMate.Mcp.Api;
 
 public static class ApiEndpoints
 {
+    private static readonly DateTime _startTime = DateTime.UtcNow;
+
     public static WebApplication MapRestApi(this WebApplication app)
     {
         var api = app.MapGroup("/api");
 
+        MapHealthEndpoint(app);
         MapRepositoryEndpoints(api);
         MapSearchEndpoints(api);
         MapStructuralEndpoints(api);
 
         return app;
+    }
+
+    // ── Health ──────────────────────────────────────────────────────────
+
+    private static void MapHealthEndpoint(WebApplication app)
+    {
+        app.MapGet("/health", async (
+            IRepoRegistry registry,
+            VectorStore vectorStore,
+            IOnnxEmbedder embedder,
+            HgvMateOptions hgvMateOptions,
+            RepoSyncOptions syncOptions) =>
+        {
+            var repos = await registry.GetAllAsync();
+            var chunkCounts = await vectorStore.GetChunkCountsAsync();
+
+            var repoStatuses = repos.Select(r => new
+            {
+                r.Name,
+                r.Url,
+                r.Branch,
+                r.Enabled,
+                LastSha = r.LastSha ?? "none",
+                LastSynced = r.LastSynced ?? "never",
+                IndexedChunks = chunkCounts.GetValueOrDefault(r.Name, 0),
+                r.Source
+            }).ToList();
+
+            var synced = repos.Count(r => r.LastSynced != null);
+            var totalChunks = chunkCounts.Values.Sum();
+
+            long? freeDiskMb = null;
+            long? totalDiskMb = null;
+            try
+            {
+                var dataRoot = Path.GetPathRoot(Path.GetFullPath(hgvMateOptions.DataPath)) ?? hgvMateOptions.DataPath;
+                var driveInfo = new DriveInfo(dataRoot);
+                freeDiskMb = driveInfo.AvailableFreeSpace / (1024 * 1024);
+                totalDiskMb = driveInfo.TotalSize / (1024 * 1024);
+            }
+            catch { /* DriveInfo not available on all platforms */ }
+
+            return Results.Ok(new
+            {
+                Status = "healthy",
+                Uptime = (DateTime.UtcNow - _startTime).ToString(@"d\.hh\:mm\:ss"),
+                Transport = hgvMateOptions.Transport,
+                Embedder = new
+                {
+                    Available = embedder.IsAvailable,
+                    Model = "all-MiniLM-L6-v2"
+                },
+                Disk = new
+                {
+                    FreeMb = freeDiskMb,
+                    TotalMb = totalDiskMb,
+                    MinRequiredMb = syncOptions.MinFreeDiskSpaceMb
+                },
+                VectorCache = new
+                {
+                    Loaded = vectorStore.IsCacheLoaded,
+                    Chunks = vectorStore.CachedChunkCount,
+                    EstimatedSizeMb = Math.Round(vectorStore.EstimatedCacheSizeMb, 1)
+                },
+                Repositories = new
+                {
+                    Total = repos.Count,
+                    Synced = synced,
+                    Pending = repos.Count - synced,
+                    TotalIndexedChunks = totalChunks,
+                    Details = repoStatuses
+                }
+            });
+        })
+        .WithTags("System")
+        .WithSummary("System health check with sync status, disk space, and indexing info");
     }
 
     // ── Repository management ───────────────────────────────────────────
@@ -45,6 +125,11 @@ public static class ApiEndpoints
             var existing = await registry.GetByNameAsync(request.Name);
             if (existing != null)
                 return Results.Conflict(new { error = $"Repository '{request.Name}' already exists." });
+
+            var existingUrl = await registry.GetByUrlAsync(request.Url);
+            if (existingUrl != null)
+                return Results.Conflict(new { error = $"A repository with the same URL is already registered as '{existingUrl.Name}' (branch: {existingUrl.Branch}). " +
+                    "Adding the same repo with a different branch would create mostly duplicate search results." });
 
             var repo = await registry.AddAsync(request.Name, request.Url, request.Branch ?? "main", source.ToLowerInvariant(), addedBy: "rest-api");
             _ = Task.Run(() => syncService.SyncRepoAsync(repo));

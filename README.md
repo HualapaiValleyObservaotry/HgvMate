@@ -9,9 +9,10 @@ An MCP (Model Context Protocol) server that provides AI agents with source code 
 - **Triple-indexed search** — git grep (text), ONNX embeddings (semantic), GitNexus (structural)
 - **REST API** with OpenAPI/Scalar documentation alongside MCP
 - **ONNX model** — all-MiniLM-L6-v2 (384-dim embeddings, ~80 MB, auto-downloads from Hugging Face)
-- **SQLite + sqlite-vec** — single-file database with vector search support
+- **SQLite** — single-file database with binary BLOB vector storage and in-memory cache
 - **Docker** — Alpine multi-stage build with ONNX model baked in
-- **106 tests** — unit, integration, protocol, SSE, REST API, live ONNX, and Docker tests
+- **In-memory vector cache** — pre-loads embeddings at startup for sub-10ms search
+- **116 tests** — unit, integration, protocol, SSE, REST API, live ONNX, and Docker tests
 
 ## Architecture
 
@@ -43,6 +44,37 @@ Endpoints:
 docker build -t hgvmate-mcp .
 docker run -i --rm -e AZURE_DEVOPS_PAT=your-pat -v hgvmate-data:/data hgvmate-mcp
 ```
+
+### Docker Compose (recommended)
+
+```bash
+docker compose up -d
+```
+
+The included `docker-compose.yml` sets recommended resource limits (2 vCPU, 2 GB RAM, 20 GB data volume) and exposes the REST API + MCP on port 5000.
+
+## Deployment Recommendations
+
+| Resource | Baseline (up to 20 repos) | Scaled (30+ repos) |
+|----------|--------------------------|---------------------|
+| **CPU** | 2 vCPUs | 4 vCPUs |
+| **Memory** | 2 GB | 4 GB |
+| **Data volume** | 20 GB | 40 GB+ |
+
+Resource limits **cannot** be set in the Dockerfile — they are applied at deployment time via `docker run` flags, `docker-compose.yml`, or your orchestrator (Kubernetes, ACA, etc.).
+
+**With `docker run`:**
+
+```bash
+docker run -d \
+  --cpus=2 --memory=2g \
+  -e HGVMATE_TRANSPORT=sse \
+  -p 5000:5000 \
+  -v hgvmate-data:/data \
+  hgvmate-mcp
+```
+
+**Health check:** `GET /health` returns system status including repo sync state, vector cache size, disk space, and embedder availability.
 
 ### VS Code MCP Config
 
@@ -98,6 +130,7 @@ When running in SSE/HTTP mode, a REST API is available alongside MCP at `/api/*`
 | POST | `/api/repositories/reindex` | Reindex all repositories |
 | GET | `/api/repositories/{name}/status` | Repository index status |
 | GET | `/api/status` | All repositories status |
+| GET | `/health` | System health check |
 | GET | `/api/search?query=...&repository=...` | Search source code |
 | GET | `/api/repositories/{repo}/files/{path}` | Read a file |
 | GET | `/api/symbols/{name}?repository=...` | Find symbol |
@@ -141,7 +174,7 @@ dotnet test --filter "FullyQualifiedName!~DockerTests&FullyQualifiedName!~LiveOn
 
 - .NET 10 (SDK Web)
 - MCP SDK (`ModelContextProtocol` + `ModelContextProtocol.AspNetCore`)
-- SQLite + sqlite-vec (vector search)
+- SQLite (binary BLOB embeddings with in-memory cache)
 - ONNX Runtime (all-MiniLM-L6-v2 local embeddings)
 - OpenAPI + Scalar (API documentation)
 - MSTest 4.x

@@ -320,6 +320,67 @@ public sealed class RepoSyncServiceTests
             "Should NOT update SHA when it could not be determined.");
     }
 
+    // ─── Disk space check ──────────────────────────────────────────────────
+
+    [TestMethod]
+    public void EnsureSufficientDiskSpace_DoesNotThrow_WhenDisabled()
+    {
+        var hgvOptions = new HgvMateOptions { DataPath = _tempDir };
+        var syncOptions = new RepoSyncOptions { ClonePath = "repos", MinFreeDiskSpaceMb = 0 };
+        var (svc, _, _) = BuildService(_tempDir);
+
+        // Should not throw — check is disabled
+        svc.EnsureSufficientDiskSpace(_tempDir);
+    }
+
+    [TestMethod]
+    public void EnsureSufficientDiskSpace_Throws_WhenInsufficientSpace()
+    {
+        var (svc, _, _) = BuildServiceWithMinDiskSpace(_tempDir, long.MaxValue / (1024 * 1024));
+
+        Assert.ThrowsExactly<InvalidOperationException>(() =>
+            svc.EnsureSufficientDiskSpace(_tempDir));
+    }
+
+    [TestMethod]
+    public void EnsureSufficientDiskSpace_DoesNotThrow_WhenSufficientSpace()
+    {
+        var (svc, _, _) = BuildServiceWithMinDiskSpace(_tempDir, 1);
+
+        // Should not throw — 1 MB is likely available
+        svc.EnsureSufficientDiskSpace(_tempDir);
+    }
+
+    private (RepoSyncService service, TrackingIndexingService indexing, TrackingRegistry registry)
+        BuildServiceWithMinDiskSpace(string tempDir, long minMb)
+    {
+        var hgvOptions = new HgvMateOptions { DataPath = tempDir };
+        var syncOptions = new RepoSyncOptions { ClonePath = "repos", MinFreeDiskSpaceMb = minMb };
+        var credProvider = new FakeCredentialProvider();
+        var registry = new TrackingRegistry();
+
+        var id = System.Threading.Interlocked.Increment(ref _counter);
+        var connStr = $"Data Source=rsstest{id};Mode=Memory;Cache=Shared";
+        var conn = new SqliteConnection(connStr);
+        conn.Open();
+        _connections.Add(conn);
+        var factory = new TestConnFactory(connStr);
+        var vectorStore = new VectorStore(factory, NullLogger<VectorStore>.Instance);
+        vectorStore.EnsureSchemaAsync().GetAwaiter().GetResult();
+
+        var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null, NullLogger<OnnxEmbedder>.Instance);
+        var reader = new SourceCodeReader(hgvOptions, syncOptions, NullLogger<SourceCodeReader>.Instance);
+        var trackingIndexing = new TrackingIndexingService(vectorStore, embedder, reader, new SearchOptions());
+        var gitNexus = new GitNexusService(hgvOptions, syncOptions, NullLogger<GitNexusService>.Instance);
+
+        var svc = new FakeGitRepoSyncService(
+            registry, credProvider, hgvOptions, syncOptions,
+            trackingIndexing, gitNexus,
+            NullLogger<RepoSyncService>.Instance, []);
+
+        return (svc, trackingIndexing, registry);
+    }
+
     // ─── Inner test helpers ──────────────────────────────────────────────────
 
     /// <summary>Subclass that intercepts RunGitAsync and returns canned responses.</summary>

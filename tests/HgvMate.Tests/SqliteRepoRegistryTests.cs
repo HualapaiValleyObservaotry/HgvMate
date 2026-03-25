@@ -120,6 +120,63 @@ public sealed class SqliteRepoRegistryTests
         Assert.IsFalse(record!.Enabled);
     }
 
+    [TestMethod]
+    public async Task GetByUrlAsync_ExactMatch_ReturnsRecord()
+    {
+        await _registry.AddAsync("repo1", "https://github.com/org/myrepo.git", "main", "github");
+        var result = await _registry.GetByUrlAsync("https://github.com/org/myrepo.git");
+        Assert.IsNotNull(result);
+        Assert.AreEqual("repo1", result.Name);
+    }
+
+    [TestMethod]
+    public async Task GetByUrlAsync_NormalizedMatch_StripsTrailingGit()
+    {
+        await _registry.AddAsync("repo1", "https://github.com/org/myrepo.git", "main", "github");
+        var result = await _registry.GetByUrlAsync("https://github.com/org/myrepo");
+        Assert.IsNotNull(result);
+        Assert.AreEqual("repo1", result.Name);
+    }
+
+    [TestMethod]
+    public async Task GetByUrlAsync_NonExistent_ReturnsNull()
+    {
+        var result = await _registry.GetByUrlAsync("https://github.com/org/nonexistent");
+        Assert.IsNull(result);
+    }
+
+    [TestMethod]
+    public void NormalizeUrl_StripsGitSuffix()
+    {
+        Assert.AreEqual(
+            SqliteRepoRegistry.NormalizeUrl("https://github.com/org/repo.git"),
+            SqliteRepoRegistry.NormalizeUrl("https://github.com/org/repo"));
+    }
+
+    [TestMethod]
+    public void NormalizeUrl_StripsTrailingSlash()
+    {
+        Assert.AreEqual(
+            SqliteRepoRegistry.NormalizeUrl("https://github.com/org/repo/"),
+            SqliteRepoRegistry.NormalizeUrl("https://github.com/org/repo"));
+    }
+
+    [TestMethod]
+    public void NormalizeUrl_NormalizesProtocol()
+    {
+        Assert.AreEqual(
+            SqliteRepoRegistry.NormalizeUrl("http://github.com/org/repo"),
+            SqliteRepoRegistry.NormalizeUrl("https://github.com/org/repo"));
+    }
+
+    [TestMethod]
+    public void NormalizeUrl_StripsEmbeddedCredentials()
+    {
+        Assert.AreEqual(
+            SqliteRepoRegistry.NormalizeUrl("https://user:token@github.com/org/repo"),
+            SqliteRepoRegistry.NormalizeUrl("https://github.com/org/repo"));
+    }
+
     private sealed class InMemoryConnectionFactory : ISqliteConnectionFactory
     {
         private readonly string _connStr;

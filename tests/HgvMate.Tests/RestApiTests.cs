@@ -50,6 +50,29 @@ public sealed class RestApiTests : IDisposable
     }
 
     [TestMethod]
+    public async Task Health_ReturnsStatusAndRepoDetails()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        // Add a repo so we have something to report on
+        await client.PostAsJsonAsync("/api/repositories", new { name = "health-test", url = "https://github.com/example/test.git" });
+
+        var response = await client.GetAsync("/health");
+
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.AreEqual("healthy", body.GetProperty("status").GetString());
+        Assert.IsTrue(body.TryGetProperty("uptime", out _));
+        Assert.IsTrue(body.TryGetProperty("embedder", out var embedder));
+        Assert.IsTrue(embedder.TryGetProperty("available", out _));
+        Assert.IsTrue(body.TryGetProperty("disk", out _));
+        var repos = body.GetProperty("repositories");
+        Assert.AreEqual(1, repos.GetProperty("total").GetInt32());
+        Assert.AreEqual(1, repos.GetProperty("details").GetArrayLength());
+    }
+
+    [TestMethod]
     public async Task ListRepositories_ReturnsEmptyArray()
     {
         await using var app = await CreateTestApp();
@@ -91,6 +114,18 @@ public sealed class RestApiTests : IDisposable
         var repo = new { name = "dupe", url = "https://github.com/example/test.git" };
         await client.PostAsJsonAsync("/api/repositories", repo);
         var response = await client.PostAsJsonAsync("/api/repositories", repo);
+
+        Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task AddRepository_DuplicateUrl_DifferentName_ReturnsConflict()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        await client.PostAsJsonAsync("/api/repositories", new { name = "repo1", url = "https://github.com/example/test.git" });
+        var response = await client.PostAsJsonAsync("/api/repositories", new { name = "repo2", url = "https://github.com/example/test" });
 
         Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode);
     }

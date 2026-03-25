@@ -117,6 +117,43 @@ public sealed class VectorStoreTests
         Assert.HasCount(2, results);
     }
 
+    [TestMethod]
+    public async Task Cache_IsLoadedAfterEnsureSchema()
+    {
+        Assert.IsTrue(_store.IsCacheLoaded);
+    }
+
+    [TestMethod]
+    public async Task Cache_ReflectsUpsertsAndDeletes()
+    {
+        Assert.AreEqual(0, _store.CachedChunkCount);
+
+        await _store.UpsertChunksAsync([
+            new SourceChunk("repo1", "a.cs", 0, "content", new float[384]),
+            new SourceChunk("repo1", "b.cs", 0, "content", new float[384]),
+        ]);
+        Assert.AreEqual(2, _store.CachedChunkCount);
+
+        await _store.DeleteChunksForFileAsync("repo1", "a.cs");
+        Assert.AreEqual(1, _store.CachedChunkCount);
+
+        await _store.DeleteChunksForRepoAsync("repo1");
+        Assert.AreEqual(0, _store.CachedChunkCount);
+    }
+
+    [TestMethod]
+    public async Task GetChunkCountsAsync_ReturnsByRepo()
+    {
+        await _store.UpsertChunksAsync([
+            new SourceChunk("repoA", "a.cs", 0, "c1", new float[384]),
+            new SourceChunk("repoA", "a.cs", 1, "c2", new float[384]),
+            new SourceChunk("repoB", "b.cs", 0, "c3", new float[384]),
+        ]);
+        var counts = await _store.GetChunkCountsAsync();
+        Assert.AreEqual(2, counts["repoA"]);
+        Assert.AreEqual(1, counts["repoB"]);
+    }
+
     private sealed class SharedConnectionFactory : ISqliteConnectionFactory
     {
         private readonly string _connStr;

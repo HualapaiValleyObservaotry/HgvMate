@@ -1,0 +1,27 @@
+services:
+  hgvmate:
+    build: .
+    container_name: hgvmate-mcp
+    environment:
+      - HGVMATE_TRANSPORT=sse
+      # - GITHUB_TOKEN=your-github-pat
+      # - AZURE_DEVOPS_PAT=your-azure-devops-pat
+    ports:
+      - "5000:5000"
+    volumes:
+      - hgvmate-data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2g
+        reservations:
+          cpus: "1.0"
+          memory: 512m
+    restart: unless-stopped
+
+volumes:
+  hgvmate-data:
+    driver: local
+    driver_opts:
+      o: size=20g

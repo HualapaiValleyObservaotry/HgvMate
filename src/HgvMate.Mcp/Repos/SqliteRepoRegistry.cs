@@ -72,6 +72,39 @@ public class SqliteRepoRegistry : IRepoRegistry
         return null;
     }
 
+    public async Task<RepoRecord?> GetByUrlAsync(string url)
+    {
+        var normalized = NormalizeUrl(url);
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.OpenAsync();
+        const string sql = "SELECT id, name, url, branch, source, enabled, last_sha, last_synced, added_by FROM repositories;";
+        using var cmd = new SqliteCommand(sql, conn);
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var record = MapRecord(reader);
+            if (NormalizeUrl(record.Url) == normalized)
+                return record;
+        }
+        return null;
+    }
+
+    internal static string NormalizeUrl(string url)
+    {
+        var normalized = url.Trim().ToLowerInvariant();
+        // Strip trailing .git
+        if (normalized.EndsWith(".git"))
+            normalized = normalized[..^4];
+        // Strip trailing slashes
+        normalized = normalized.TrimEnd('/');
+        // Normalize protocol — treat https://github.com and http://github.com the same
+        normalized = normalized.Replace("http://", "https://");
+        // Strip embedded credentials (https://user:pass@host → https://host)
+        if (Uri.TryCreate(normalized, UriKind.Absolute, out var uri))
+            normalized = $"{uri.Scheme}://{uri.Host}{uri.AbsolutePath}".TrimEnd('/');
+        return normalized;
+    }
+
     public async Task<bool> UpdateLastShaAsync(string name, string sha)
     {
         using var conn = _connectionFactory.CreateConnection();

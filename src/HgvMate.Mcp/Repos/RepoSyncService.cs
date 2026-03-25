@@ -170,6 +170,7 @@ public class RepoSyncService : BackgroundService
 
     private async Task CloneRepoAsync(RepoRecord repo, string clonePath, CancellationToken cancellationToken)
     {
+        EnsureSufficientDiskSpace(clonePath);
         var authUrl = _credentialProvider.BuildAuthenticatedUrl(repo.Url, repo.Source);
         Directory.CreateDirectory(clonePath);
         await RunGitAsync(
@@ -227,6 +228,30 @@ public class RepoSyncService : BackgroundService
         {
             _logger.LogInformation("Deleting clone directory '{Path}'.", clonePath);
             await Task.Run(() => Directory.Delete(clonePath, recursive: true));
+        }
+    }
+
+    internal void EnsureSufficientDiskSpace(string targetPath)
+    {
+        if (_syncOptions.MinFreeDiskSpaceMb <= 0) return;
+
+        try
+        {
+            var root = Path.GetPathRoot(Path.GetFullPath(targetPath)) ?? targetPath;
+            var driveInfo = new DriveInfo(root);
+            var freeMb = driveInfo.AvailableFreeSpace / (1024 * 1024);
+
+            if (freeMb < _syncOptions.MinFreeDiskSpaceMb)
+            {
+                throw new InvalidOperationException(
+                    $"Insufficient disk space. Available: {freeMb} MB, required minimum: {_syncOptions.MinFreeDiskSpaceMb} MB. " +
+                    $"Free up space or adjust RepoSync:MinFreeDiskSpaceMb in configuration.");
+            }
+        }
+        catch (InvalidOperationException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not check disk space for '{Path}'. Proceeding with clone.", targetPath);
         }
     }
 }

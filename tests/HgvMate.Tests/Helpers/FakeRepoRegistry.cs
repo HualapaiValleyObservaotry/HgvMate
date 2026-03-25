@@ -26,6 +26,10 @@ internal class FakeRepoRegistry : IRepoRegistry
     public Task<RepoRecord?> GetByNameAsync(string name)
         => Task.FromResult(_repos.FirstOrDefault(r => r.Name == name));
 
+    public Task<RepoRecord?> GetByUrlAsync(string url)
+        => Task.FromResult(_repos.FirstOrDefault(r =>
+            SqliteRepoRegistry.NormalizeUrl(r.Url) == SqliteRepoRegistry.NormalizeUrl(url)));
+
     public virtual Task<bool> UpdateLastShaAsync(string name, string sha)
         => Task.FromResult(true);
 

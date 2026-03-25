@@ -18,6 +18,7 @@ public interface IRepoRegistry
     Task<bool> RemoveAsync(string name);
     Task<IReadOnlyList<RepoRecord>> GetAllAsync();
     Task<RepoRecord?> GetByNameAsync(string name);
+    Task<RepoRecord?> GetByUrlAsync(string url);
     Task<bool> UpdateLastShaAsync(string name, string sha);
     Task<bool> UpdateLastSyncedAsync(string name, DateTime syncedAt);
     Task<bool> SetEnabledAsync(string name, bool enabled);

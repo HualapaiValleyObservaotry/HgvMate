@@ -94,6 +94,30 @@ public sealed class AdminToolsTests
         StringAssert.Contains(result, "not found");
     }
 
+    [TestMethod]
+    public async Task AddRepository_DuplicateUrl_DifferentBranch_ReturnsError()
+    {
+        await _tools.AddRepository("repo1", "https://github.com/org/myrepo.git");
+        var result = await _tools.AddRepository("repo2", "https://github.com/org/myrepo", branch: "develop");
+        StringAssert.Contains(result, "same URL is already registered");
+    }
+
+    [TestMethod]
+    public async Task AddRepository_DuplicateUrl_WithTrailingGit_ReturnsError()
+    {
+        await _tools.AddRepository("repo1", "https://github.com/org/myrepo");
+        var result = await _tools.AddRepository("repo2", "https://github.com/org/myrepo.git");
+        StringAssert.Contains(result, "same URL is already registered");
+    }
+
+    [TestMethod]
+    public async Task AddRepository_DifferentUrl_Succeeds()
+    {
+        await _tools.AddRepository("repo1", "https://github.com/org/repo1");
+        var result = await _tools.AddRepository("repo2", "https://github.com/org/repo2");
+        StringAssert.Contains(result, "added");
+    }
+
     private sealed class FakeRepoRegistry : IRepoRegistry
     {
         private readonly List<RepoRecord> _repos = [];
@@ -117,6 +141,10 @@ public sealed class AdminToolsTests
 
         public Task<RepoRecord?> GetByNameAsync(string name)
             => Task.FromResult(_repos.FirstOrDefault(r => r.Name == name));
+
+        public Task<RepoRecord?> GetByUrlAsync(string url)
+            => Task.FromResult(_repos.FirstOrDefault(r =>
+                SqliteRepoRegistry.NormalizeUrl(r.Url) == SqliteRepoRegistry.NormalizeUrl(url)));
 
         public Task<bool> UpdateLastShaAsync(string name, string sha)
         {

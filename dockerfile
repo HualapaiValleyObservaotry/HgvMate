@@ -14,7 +14,8 @@ FROM alpine:3.21 AS runtime
 
 # git (repo operations) + Node.js / npm (GitNexus) + curl (model download)
 # .NET self-contained native deps on musl: libstdc++ icu-libs
-RUN apk add --no-cache git nodejs npm curl libstdc++ icu-libs
+RUN apk add --no-cache git nodejs npm curl libstdc++ icu-libs && \
+    npm install -g gitnexus@latest
 
 WORKDIR /app
 COPY --from=build /app .

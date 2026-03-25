@@ -6,3 +6,4 @@ appsettings.Development.json
 *.db-wal
 bin/
 obj/
+.data/

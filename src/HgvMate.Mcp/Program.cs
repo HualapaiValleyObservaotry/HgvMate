@@ -42,6 +42,13 @@ if (useSse)
 
     await InitializeDataStores(app.Services);
 
+    app.UseForwardedHeaders(new ForwardedHeadersOptions
+    {
+        ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+                         | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
+                         | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost
+    });
+
     app.MapOpenApi();
     app.MapScalarApiReference();
     app.MapMcp("/mcp");

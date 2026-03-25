@@ -39,6 +39,11 @@ public class AdminTools
             if (existing != null)
                 return $"Error: Repository '{name}' already exists.";
 
+            var existingUrl = await _registry.GetByUrlAsync(url);
+            if (existingUrl != null)
+                return $"Error: A repository with the same URL is already registered as '{existingUrl.Name}' (branch: {existingUrl.Branch}). " +
+                       "Adding the same repo with a different branch would create mostly duplicate search results.";
+
             var repo = await _registry.AddAsync(name, url, branch, source.ToLowerInvariant(), addedBy: "mcp-tool");
             _ = Task.Run(() => _syncService.SyncRepoAsync(repo));
             return $"Repository '{name}' added and sync initiated. Use hgvmate_index_status to track progress.";
