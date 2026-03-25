@@ -68,10 +68,11 @@ if (useSse)
             if (isBusy)
                 context.Response.Headers["Retry-After"] = "5";
 
+            var isDev = app.Environment.IsDevelopment();
             await context.Response.WriteAsJsonAsync(new
             {
                 error = isBusy ? "Service temporarily unavailable." : "An unexpected error occurred.",
-                detail = ex?.Message,
+                detail = isBusy || isDev ? ex?.Message : null,
                 traceId
             });
         });

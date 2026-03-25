@@ -231,7 +231,7 @@ public class RepoSyncService : BackgroundService
         }
 
         if (lastException != null)
-            throw lastException;
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(lastException).Throw();
 
         throw new InvalidOperationException($"{operationName} failed for repo '{repoName}' after all retry attempts.");
     }
@@ -267,8 +267,7 @@ public class RepoSyncService : BackgroundService
             msg.Contains("503") ||
             msg.Contains("temporary") ||
             ex is IOException ||
-            ex is TimeoutException ||
-            ex is OperationCanceledException)
+            ex is TimeoutException)
         {
             return true;
         }
