@@ -15,6 +15,10 @@ public interface IOnnxEmbedder
 public class OnnxEmbedder : IOnnxEmbedder, IDisposable
 {
     public const int EmbeddingDimensions = 384;
+    private const string ModelFileName = "all-MiniLM-L6-v2.onnx";
+    private const string ModelDownloadUrl =
+        "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx";
+
     private readonly ILogger<OnnxEmbedder> _logger;
     private InferenceSession? _session;
     private bool _disposed;
@@ -25,12 +29,9 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
     public OnnxEmbedder(HgvMateOptions options, ILogger<OnnxEmbedder> logger)
     {
         _logger = logger;
-        var modelPath = Path.Combine(AppContext.BaseDirectory, "models", "all-MiniLM-L6-v2.onnx");
+        var modelPath = ResolveModelPath(options);
 
-        if (!File.Exists(modelPath))
-            modelPath = Path.Combine(options.DataPath, "models", "all-MiniLM-L6-v2.onnx");
-
-        if (File.Exists(modelPath))
+        if (modelPath != null && File.Exists(modelPath))
         {
             try
             {
@@ -44,9 +45,48 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
         }
         else
         {
-            _logger.LogInformation(
-                "ONNX model not found at '{Path}'. Semantic search will be disabled. Text search remains available.",
-                modelPath);
+            _logger.LogWarning(
+                "ONNX model could not be resolved. Semantic search will be disabled. Text search remains available.");
+        }
+    }
+
+    private string? ResolveModelPath(HgvMateOptions options)
+    {
+        // 1. Check next to app binary
+        var appPath = Path.Combine(AppContext.BaseDirectory, "models", ModelFileName);
+        if (File.Exists(appPath)) return appPath;
+
+        // 2. Check in data path
+        var dataPath = Path.Combine(options.DataPath, "models", ModelFileName);
+        if (File.Exists(dataPath)) return dataPath;
+
+        // 3. Auto-download to data path
+        _logger.LogInformation("ONNX model not found locally. Downloading from Hugging Face...");
+        try
+        {
+            var modelsDir = Path.GetDirectoryName(dataPath)!;
+            Directory.CreateDirectory(modelsDir);
+
+            using var httpClient = new HttpClient();
+            httpClient.Timeout = TimeSpan.FromMinutes(10);
+
+            var tempPath = dataPath + ".download";
+            using (var response = httpClient.GetAsync(ModelDownloadUrl, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
+            {
+                response.EnsureSuccessStatusCode();
+                using var stream = response.Content.ReadAsStream();
+                using var fileStream = File.Create(tempPath);
+                stream.CopyTo(fileStream);
+            }
+
+            File.Move(tempPath, dataPath, overwrite: true);
+            _logger.LogInformation("ONNX model downloaded to '{Path}'.", dataPath);
+            return dataPath;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to download ONNX model. Semantic search will be disabled.");
+            return null;
         }
     }
 
@@ -114,7 +154,10 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
         return v.Select(x => x / norm).ToArray();
     }
 
-    // Minimal whitespace tokenizer — real BERT BPE tokenizer required for production use.
+    // Minimal whitespace tokenizer — maps words to token IDs within the model's vocabulary range.
+    // all-MiniLM-L6-v2 has a vocabulary size of 30,522 (standard BERT uncased).
+    private const int VocabSize = 30522;
+
     private static long[] SimpleTokenize(string text)
     {
         var words = text.Split([' ', '\n', '\r', '\t', '.', ',', '(', ')', '{', '}', ';'],
@@ -123,7 +166,11 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
         tokens[0] = 101; // [CLS]
         int i = 1;
         foreach (var word in words.Take(126))
-            tokens[i++] = Math.Abs((long)word.GetHashCode()) % 30000 + 1000;
+        {
+            // Map to valid range [1, VocabSize-1], avoiding special tokens 0-999
+            var hash = (uint)word.ToLowerInvariant().GetHashCode();
+            tokens[i++] = (long)(hash % (VocabSize - 1000)) + 1000;
+        }
         tokens[i] = 102; // [SEP]
         return tokens[..(i + 1)];
     }

@@ -12,16 +12,18 @@ RUN dotnet publish src/HgvMate.Mcp/HgvMate.Mcp.csproj \
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM alpine:3.21 AS runtime
 
-# git (repo operations) + Node.js / npm (GitNexus)
-RUN apk add --no-cache git nodejs npm \
+# git (repo operations) + Node.js / npm (GitNexus) + curl (model download)
+RUN apk add --no-cache git nodejs npm curl \
     # .NET self-contained native deps on musl
     libstdc++ icu-libs
 
 WORKDIR /app
 COPY --from=build /app .
 
-# Model placeholder directory — mount or COPY your ONNX model here at build time
-RUN mkdir -p /app/models
+# Download the all-MiniLM-L6-v2 ONNX model (~80 MB)
+RUN mkdir -p /app/models && \
+    curl -fSL -o /app/models/all-MiniLM-L6-v2.onnx \
+    "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx"
 
 VOLUME /data
 ENV HgvMate__DataPath=/data
