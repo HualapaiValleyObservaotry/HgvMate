@@ -20,9 +20,10 @@ public class SqliteRepoRegistry : IRepoRegistry
         using var conn = _connectionFactory.CreateConnection();
         await conn.OpenAsync();
         const string sql = """
-            INSERT INTO repositories (name, url, branch, source, enabled, added_by)
-            VALUES (@name, @url, @branch, @source, 1, @addedBy)
-            RETURNING id, name, url, branch, source, enabled, last_sha, last_synced, added_by;
+            INSERT INTO repositories (name, url, branch, source, enabled, added_by, sync_state)
+            VALUES (@name, @url, @branch, @source, 1, @addedBy, 'pending')
+            RETURNING id, name, url, branch, source, enabled, last_sha, last_synced, added_by,
+                      last_error, last_error_at, failed_sync_count, sync_state;
             """;
         using var cmd = new SqliteCommand(sql, conn);
         cmd.Parameters.AddWithValue("@name", name);
@@ -50,7 +51,11 @@ public class SqliteRepoRegistry : IRepoRegistry
     {
         using var conn = _connectionFactory.CreateConnection();
         await conn.OpenAsync();
-        const string sql = "SELECT id, name, url, branch, source, enabled, last_sha, last_synced, added_by FROM repositories ORDER BY name;";
+        const string sql = """
+            SELECT id, name, url, branch, source, enabled, last_sha, last_synced, added_by,
+                   last_error, last_error_at, failed_sync_count, sync_state
+            FROM repositories ORDER BY name;
+            """;
         using var cmd = new SqliteCommand(sql, conn);
         using var reader = await cmd.ExecuteReaderAsync();
         var results = new List<RepoRecord>();
@@ -63,7 +68,11 @@ public class SqliteRepoRegistry : IRepoRegistry
     {
         using var conn = _connectionFactory.CreateConnection();
         await conn.OpenAsync();
-        const string sql = "SELECT id, name, url, branch, source, enabled, last_sha, last_synced, added_by FROM repositories WHERE name = @name;";
+        const string sql = """
+            SELECT id, name, url, branch, source, enabled, last_sha, last_synced, added_by,
+                   last_error, last_error_at, failed_sync_count, sync_state
+            FROM repositories WHERE name = @name;
+            """;
         using var cmd = new SqliteCommand(sql, conn);
         cmd.Parameters.AddWithValue("@name", name);
         using var reader = await cmd.ExecuteReaderAsync();
@@ -77,7 +86,11 @@ public class SqliteRepoRegistry : IRepoRegistry
         var normalized = NormalizeUrl(url);
         using var conn = _connectionFactory.CreateConnection();
         await conn.OpenAsync();
-        const string sql = "SELECT id, name, url, branch, source, enabled, last_sha, last_synced, added_by FROM repositories;";
+        const string sql = """
+            SELECT id, name, url, branch, source, enabled, last_sha, last_synced, added_by,
+                   last_error, last_error_at, failed_sync_count, sync_state
+            FROM repositories;
+            """;
         using var cmd = new SqliteCommand(sql, conn);
         using var reader = await cmd.ExecuteReaderAsync();
         while (await reader.ReadAsync())
@@ -138,6 +151,53 @@ public class SqliteRepoRegistry : IRepoRegistry
         return await cmd.ExecuteNonQueryAsync() > 0;
     }
 
+    public async Task<bool> UpdateSyncStateAsync(string name, string state)
+    {
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.OpenAsync();
+        const string sql = "UPDATE repositories SET sync_state = @state WHERE name = @name;";
+        using var cmd = new SqliteCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@state", state);
+        cmd.Parameters.AddWithValue("@name", name);
+        return await cmd.ExecuteNonQueryAsync() > 0;
+    }
+
+    public async Task<bool> UpdateSyncErrorAsync(string name, string error)
+    {
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.OpenAsync();
+        const string sql = """
+            UPDATE repositories
+            SET sync_state = 'failed',
+                last_error = @error,
+                last_error_at = @errorAt,
+                failed_sync_count = failed_sync_count + 1
+            WHERE name = @name;
+            """;
+        using var cmd = new SqliteCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@error", error);
+        cmd.Parameters.AddWithValue("@errorAt", DateTime.UtcNow.ToString("o"));
+        cmd.Parameters.AddWithValue("@name", name);
+        return await cmd.ExecuteNonQueryAsync() > 0;
+    }
+
+    public async Task<bool> ClearSyncErrorAsync(string name)
+    {
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.OpenAsync();
+        const string sql = """
+            UPDATE repositories
+            SET sync_state = 'synced',
+                last_error = NULL,
+                last_error_at = NULL,
+                failed_sync_count = 0
+            WHERE name = @name;
+            """;
+        using var cmd = new SqliteCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@name", name);
+        return await cmd.ExecuteNonQueryAsync() > 0;
+    }
+
     private static RepoRecord MapRecord(SqliteDataReader reader) => new(
         Id: reader.GetInt32(0),
         Name: reader.GetString(1),
@@ -147,6 +207,10 @@ public class SqliteRepoRegistry : IRepoRegistry
         Enabled: reader.GetInt32(5) != 0,
         LastSha: reader.IsDBNull(6) ? null : reader.GetString(6),
         LastSynced: reader.IsDBNull(7) ? null : reader.GetString(7),
-        AddedBy: reader.IsDBNull(8) ? null : reader.GetString(8)
+        AddedBy: reader.IsDBNull(8) ? null : reader.GetString(8),
+        LastError: reader.IsDBNull(9) ? null : reader.GetString(9),
+        LastErrorAt: reader.IsDBNull(10) ? null : reader.GetString(10),
+        FailedSyncCount: reader.IsDBNull(11) ? 0 : reader.GetInt32(11),
+        SyncState: reader.IsDBNull(12) ? SyncStates.Pending : reader.GetString(12)
     );
 }

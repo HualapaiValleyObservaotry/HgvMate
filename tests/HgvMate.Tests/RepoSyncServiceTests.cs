@@ -430,7 +430,7 @@ public sealed class RepoSyncServiceTests
             : base(vectorStore, embedder, reader, searchOptions, NullLogger<IndexingService>.Instance)
         { }
 
-        public override Task IndexRepoAsync(string repoName, CancellationToken cancellationToken = default)
+        public override Task<IndexResult> IndexRepoAsync(string repoName, CancellationToken cancellationToken = default)
         {
             IndexRepoCalls++;
             return base.IndexRepoAsync(repoName, cancellationToken);

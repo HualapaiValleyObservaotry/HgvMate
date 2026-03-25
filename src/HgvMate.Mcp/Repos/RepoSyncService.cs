@@ -15,6 +15,11 @@ public class RepoSyncService : BackgroundService
     private readonly GitNexusService _gitNexusService;
     private readonly ILogger<RepoSyncService> _logger;
 
+    // Limit concurrent syncs to prevent OOM from unbounded parallel git clones + ONNX indexing
+    private readonly SemaphoreSlim _syncSemaphore = new(3, 3);
+
+    private static readonly TimeSpan[] RetryDelays = [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(8)];
+
     public RepoSyncService(
         IRepoRegistry registry,
         IGitCredentialProvider credentialProvider,
@@ -66,8 +71,22 @@ public class RepoSyncService : BackgroundService
 
     public virtual async Task SyncRepoAsync(RepoRecord repo, CancellationToken cancellationToken = default)
     {
+        await _syncSemaphore.WaitAsync(cancellationToken);
+        try
+        {
+            await SyncRepoInternalAsync(repo, cancellationToken);
+        }
+        finally
+        {
+            _syncSemaphore.Release();
+        }
+    }
+
+    private async Task SyncRepoInternalAsync(RepoRecord repo, CancellationToken cancellationToken)
+    {
         var clonePath = GetClonePath(repo.Name);
         _logger.LogInformation("Syncing repo '{Name}' to '{Path}'...", repo.Name, clonePath);
+        await _registry.UpdateSyncStateAsync(repo.Name, SyncStates.Syncing);
 
         try
         {
@@ -76,11 +95,11 @@ public class RepoSyncService : BackgroundService
 
             if (isFirstSync)
             {
-                await CloneRepoAsync(repo, clonePath, cancellationToken);
+                await CloneWithRetryAsync(repo, clonePath, cancellationToken);
             }
             else
             {
-                await PullRepoAsync(repo, clonePath, cancellationToken);
+                await PullWithRetryAsync(repo, clonePath, cancellationToken);
             }
 
             var newSha = await GetCurrentShaAsync(clonePath, cancellationToken);
@@ -91,6 +110,7 @@ public class RepoSyncService : BackgroundService
                 await _indexingService.IndexRepoAsync(repo.Name, cancellationToken);
                 await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
                 await _registry.UpdateLastSyncedAsync(repo.Name, DateTime.UtcNow);
+                await _registry.ClearSyncErrorAsync(repo.Name);
                 return;
             }
 
@@ -131,10 +151,13 @@ public class RepoSyncService : BackgroundService
             {
                 _logger.LogInformation("Repo '{Name}' is up-to-date (SHA: {Sha}). Skipping re-index.", repo.Name, newSha);
             }
+
+            await _registry.ClearSyncErrorAsync(repo.Name);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to sync repo '{Name}'.", repo.Name);
+            await _registry.UpdateSyncErrorAsync(repo.Name, ex.Message);
         }
     }
 
@@ -168,21 +191,115 @@ public class RepoSyncService : BackgroundService
         }
     }
 
+    private async Task CloneWithRetryAsync(RepoRecord repo, string clonePath, CancellationToken cancellationToken)
+    {
+        await ExecuteWithRetryAsync(
+            () => CloneRepoAsync(repo, clonePath, cancellationToken),
+            repo.Name,
+            "clone",
+            cancellationToken);
+    }
+
+    private async Task PullWithRetryAsync(RepoRecord repo, string clonePath, CancellationToken cancellationToken)
+    {
+        await ExecuteWithRetryAsync(
+            () => PullRepoAsync(repo, clonePath, cancellationToken),
+            repo.Name,
+            "pull",
+            cancellationToken);
+    }
+
+    private async Task ExecuteWithRetryAsync(Func<Task> operation, string repoName, string operationName, CancellationToken cancellationToken)
+    {
+        Exception? lastException = null;
+        for (int attempt = 0; attempt <= RetryDelays.Length; attempt++)
+        {
+            try
+            {
+                await operation();
+                return;
+            }
+            catch (Exception ex) when (attempt < RetryDelays.Length && IsTransientError(ex))
+            {
+                lastException = ex;
+                var delay = RetryDelays[attempt];
+                _logger.LogWarning(ex,
+                    "Transient error during {Operation} for repo '{Name}' (attempt {Attempt}/{Max}). Retrying in {Delay}s...",
+                    operationName, repoName, attempt + 1, RetryDelays.Length + 1, delay.TotalSeconds);
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+
+        if (lastException != null)
+            throw lastException;
+
+        throw new InvalidOperationException($"{operationName} failed for repo '{repoName}' after all retry attempts.");
+    }
+
+    /// <summary>
+    /// Returns true for errors that are worth retrying (network blips, rate limits, auth timeouts).
+    /// Returns false for permanent failures (repo not found, access denied).
+    /// </summary>
+    internal static bool IsTransientError(Exception ex)
+    {
+        var msg = ex.Message.ToLowerInvariant();
+
+        // Permanent errors — do not retry
+        if (msg.Contains("repository not found") ||
+            msg.Contains("not found") && msg.Contains("remote") ||
+            msg.Contains("access denied") ||
+            msg.Contains("authentication failed") ||
+            msg.Contains("permission denied") ||
+            msg.Contains("does not exist"))
+        {
+            return false;
+        }
+
+        // Transient errors — retry
+        if (msg.Contains("timed out") ||
+            msg.Contains("timeout") ||
+            msg.Contains("connection reset") ||
+            msg.Contains("connection refused") ||
+            msg.Contains("unable to connect") ||
+            msg.Contains("could not resolve host") ||
+            msg.Contains("rate limit") ||
+            msg.Contains("429") ||
+            msg.Contains("503") ||
+            msg.Contains("temporary") ||
+            ex is IOException ||
+            ex is TimeoutException ||
+            ex is OperationCanceledException)
+        {
+            return true;
+        }
+
+        // Unknown errors — treat as transient to avoid silent permanent failures
+        return true;
+    }
+
     private async Task CloneRepoAsync(RepoRecord repo, string clonePath, CancellationToken cancellationToken)
     {
         EnsureSufficientDiskSpace(clonePath);
         var authUrl = _credentialProvider.BuildAuthenticatedUrl(repo.Url, repo.Source);
         Directory.CreateDirectory(clonePath);
-        await RunGitAsync(
+        var (_, exitCode) = await RunGitAsync(
             ["clone", "--depth", "1", "--single-branch", "--branch", repo.Branch, authUrl, "."],
             clonePath,
             cancellationToken);
+
+        if (exitCode != 0)
+            throw new InvalidOperationException($"git clone exited with code {exitCode} for repo '{repo.Name}'.");
     }
 
     private async Task PullRepoAsync(RepoRecord repo, string clonePath, CancellationToken cancellationToken)
     {
-        await RunGitAsync(["fetch", "--depth", "1", "origin", repo.Branch], clonePath, cancellationToken);
-        await RunGitAsync(["reset", "--hard", $"origin/{repo.Branch}"], clonePath, cancellationToken);
+        var (_, fetchCode) = await RunGitAsync(["fetch", "--depth", "1", "origin", repo.Branch], clonePath, cancellationToken);
+        if (fetchCode != 0)
+            throw new InvalidOperationException($"git fetch exited with code {fetchCode} for repo '{repo.Name}'.");
+
+        var (_, resetCode) = await RunGitAsync(["reset", "--hard", $"origin/{repo.Branch}"], clonePath, cancellationToken);
+        if (resetCode != 0)
+            throw new InvalidOperationException($"git reset exited with code {resetCode} for repo '{repo.Name}'.");
     }
 
     private async Task<string?> GetCurrentShaAsync(string clonePath, CancellationToken cancellationToken)

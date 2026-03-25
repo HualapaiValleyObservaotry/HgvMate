@@ -44,10 +44,15 @@ public static class ApiEndpoints
                 LastSha = r.LastSha ?? "none",
                 LastSynced = r.LastSynced ?? "never",
                 IndexedChunks = chunkCounts.GetValueOrDefault(r.Name, 0),
-                r.Source
+                r.Source,
+                SyncState = r.SyncState,
+                LastError = r.LastError,
+                LastErrorAt = r.LastErrorAt,
+                FailedSyncCount = r.FailedSyncCount
             }).ToList();
 
             var synced = repos.Count(r => r.LastSynced != null);
+            var failedRepos = repos.Count(r => r.SyncState == SyncStates.Failed);
             var totalChunks = chunkCounts.Values.Sum();
 
             long? freeDiskMb = null;
@@ -63,7 +68,7 @@ public static class ApiEndpoints
 
             return Results.Ok(new
             {
-                Status = "healthy",
+                Status = failedRepos > 0 ? "degraded" : "healthy",
                 Uptime = (DateTime.UtcNow - _startTime).ToString(@"d\.hh\:mm\:ss"),
                 Transport = hgvMateOptions.Transport,
                 Embedder = new
@@ -88,6 +93,7 @@ public static class ApiEndpoints
                     Total = repos.Count,
                     Synced = synced,
                     Pending = repos.Count - synced,
+                    Failed = failedRepos,
                     TotalIndexedChunks = totalChunks,
                     Details = repoStatuses
                 }
@@ -133,7 +139,16 @@ public static class ApiEndpoints
 
             var repo = await registry.AddAsync(request.Name, request.Url, request.Branch ?? "main", source.ToLowerInvariant(), addedBy: "rest-api");
             _ = Task.Run(() => syncService.SyncRepoAsync(repo));
-            return Results.Created($"/api/repositories/{repo.Name}", repo);
+            return Results.Accepted($"/api/repositories/{repo.Name}/status", new
+            {
+                message = $"Repository '{repo.Name}' added. Sync initiated.",
+                statusUrl = $"/api/repositories/{repo.Name}/status",
+                repo.Name,
+                repo.Url,
+                repo.Branch,
+                repo.Source,
+                SyncState = repo.SyncState
+            });
         })
         .WithSummary("Add a repository to be indexed");
 
@@ -183,7 +198,11 @@ public static class ApiEndpoints
                 repo.Enabled,
                 LastSha = repo.LastSha ?? "none",
                 LastSynced = repo.LastSynced ?? "never",
-                repo.Source
+                repo.Source,
+                SyncState = repo.SyncState,
+                LastError = repo.LastError,
+                LastErrorAt = repo.LastErrorAt,
+                FailedSyncCount = repo.FailedSyncCount
             });
         })
         .WithSummary("Get index status for a specific repository");
@@ -197,7 +216,11 @@ public static class ApiEndpoints
                 r.Enabled,
                 LastSha = r.LastSha ?? "none",
                 LastSynced = r.LastSynced ?? "never",
-                r.Source
+                r.Source,
+                SyncState = r.SyncState,
+                LastError = r.LastError,
+                LastErrorAt = r.LastErrorAt,
+                FailedSyncCount = r.FailedSyncCount
             });
             return TypedResults.Ok(statuses);
         })
