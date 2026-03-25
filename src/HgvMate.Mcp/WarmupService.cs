@@ -15,6 +15,7 @@ public sealed class WarmupService : BackgroundService
 {
     private readonly DatabaseInitializer _dbInit;
     private readonly VectorStore _vectorStore;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly IOnnxEmbedder _embedder;
     private readonly StartupState _startupState;
     private readonly ILogger<WarmupService> _logger;
@@ -22,12 +23,14 @@ public sealed class WarmupService : BackgroundService
     public WarmupService(
         DatabaseInitializer dbInit,
         VectorStore vectorStore,
+        ISqliteConnectionFactory connectionFactory,
         IOnnxEmbedder embedder,
         StartupState startupState,
         ILogger<WarmupService> logger)
     {
         _dbInit = dbInit;
         _vectorStore = vectorStore;
+        _connectionFactory = connectionFactory;
         _embedder = embedder;
         _startupState = startupState;
         _logger = logger;
@@ -46,7 +49,7 @@ public sealed class WarmupService : BackgroundService
             _logger.LogInformation("Warmup: database ready.");
 
             _logger.LogInformation("Warmup: loading vector cache...");
-            await _vectorStore.EnsureSchemaAsync();
+            await LoadOrMigrateVectorsAsync();
             _startupState.MarkVectorCacheReady();
             _logger.LogInformation("Warmup: vector cache ready ({Chunks} chunks).", _vectorStore.CachedChunkCount);
 
@@ -59,6 +62,25 @@ public sealed class WarmupService : BackgroundService
         catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
         {
             _logger.LogError(ex, "Warmup: initialization failed. The server is running but some features may be unavailable.");
+        }
+    }
+
+    private async Task LoadOrMigrateVectorsAsync()
+    {
+        // Try loading from binary file first (fast path)
+        await _vectorStore.LoadAsync();
+
+        if (_vectorStore.CachedChunkCount > 0)
+            return;
+
+        // Binary file was empty or missing — check if SQLite has legacy data to migrate
+        _logger.LogInformation("Warmup: no binary vector data found. Checking SQLite for legacy data...");
+        await _vectorStore.MigrateFromSqliteAsync(_connectionFactory);
+
+        if (_vectorStore.CachedChunkCount > 0)
+        {
+            _logger.LogInformation("Warmup: saving migrated data to binary format...");
+            await _vectorStore.SaveAsync();
         }
     }
 }

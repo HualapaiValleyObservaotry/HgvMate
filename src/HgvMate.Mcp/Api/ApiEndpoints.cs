@@ -52,7 +52,7 @@ public static class ApiEndpoints
             }
 
             var repos = await registry.GetAllAsync();
-            var chunkCounts = await vectorStore.GetChunkCountsAsync();
+            var chunkCounts = vectorStore.GetChunkCounts();
 
             var repoStatuses = repos.Select(r => new
             {

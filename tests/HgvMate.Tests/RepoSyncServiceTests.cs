@@ -1,8 +1,6 @@
 using HgvMate.Mcp.Configuration;
-using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HgvMate.Tests;
@@ -12,7 +10,6 @@ public sealed class RepoSyncServiceTests
 {
     private string _tempDir = null!;
     private static int _counter;
-    private readonly List<SqliteConnection> _connections = [];
 
     [TestInitialize]
     public void Setup()
@@ -24,10 +21,6 @@ public sealed class RepoSyncServiceTests
     [TestCleanup]
     public void Cleanup()
     {
-        foreach (var conn in _connections)
-            conn.Dispose();
-        _connections.Clear();
-
         if (Directory.Exists(_tempDir))
             Directory.Delete(_tempDir, recursive: true);
     }
@@ -45,13 +38,8 @@ public sealed class RepoSyncServiceTests
         var registry = new TrackingRegistry();
 
         var id = System.Threading.Interlocked.Increment(ref _counter);
-        var connStr = $"Data Source=rsstest{id};Mode=Memory;Cache=Shared";
-        var conn = new SqliteConnection(connStr);
-        conn.Open();
-        _connections.Add(conn); // disposed in TestCleanup
-        var factory = new TestConnFactory(connStr);
-        var vectorStore = new VectorStore(factory, NullLogger<VectorStore>.Instance);
-        vectorStore.EnsureSchemaAsync().GetAwaiter().GetResult();
+        var vectorStore = new VectorStore(Path.Combine(tempDir, $"vectors{id}.bin"), NullLogger<VectorStore>.Instance);
+        vectorStore.LoadAsync().GetAwaiter().GetResult();
 
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null, NullLogger<OnnxEmbedder>.Instance);
         var reader = new SourceCodeReader(hgvOptions, syncOptions, NullLogger<SourceCodeReader>.Instance);
@@ -375,13 +363,8 @@ public sealed class RepoSyncServiceTests
         var registry = new TrackingRegistry();
 
         var id = System.Threading.Interlocked.Increment(ref _counter);
-        var connStr = $"Data Source=rsstest{id};Mode=Memory;Cache=Shared";
-        var conn = new SqliteConnection(connStr);
-        conn.Open();
-        _connections.Add(conn);
-        var factory = new TestConnFactory(connStr);
-        var vectorStore = new VectorStore(factory, NullLogger<VectorStore>.Instance);
-        vectorStore.EnsureSchemaAsync().GetAwaiter().GetResult();
+        var vectorStore = new VectorStore(Path.Combine(tempDir, $"vectors{id}.bin"), NullLogger<VectorStore>.Instance);
+        vectorStore.LoadAsync().GetAwaiter().GetResult();
 
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null, NullLogger<OnnxEmbedder>.Instance);
         var reader = new SourceCodeReader(hgvOptions, syncOptions, NullLogger<SourceCodeReader>.Instance);
@@ -477,13 +460,6 @@ public sealed class RepoSyncServiceTests
     {
         public string? GetToken(string source) => null;
         public string BuildAuthenticatedUrl(string url, string source) => url;
-    }
-
-    private sealed class TestConnFactory : ISqliteConnectionFactory
-    {
-        private readonly string _connStr;
-        public TestConnFactory(string connStr) => _connStr = connStr;
-        public SqliteConnection CreateConnection() => new SqliteConnection(_connStr);
     }
 
     /// <summary>Compares string[] keys for dictionary lookups by content.</summary>

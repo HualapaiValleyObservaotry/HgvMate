@@ -80,7 +80,7 @@ public class HybridSearchService
         try
         {
             var queryVector = await _embedder.EmbedAsync(query, cancellationToken);
-            return await _vectorStore.SearchAsync(queryVector, repositoryName, _searchOptions.MaxResults);
+            return _vectorStore.Search(queryVector, repositoryName, _searchOptions.MaxResults);
         }
         catch (Exception ex)
         {

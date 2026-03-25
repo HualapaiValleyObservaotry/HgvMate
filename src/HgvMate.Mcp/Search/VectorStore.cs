@@ -1,6 +1,4 @@
 using System.Collections.Concurrent;
-using HgvMate.Mcp.Data;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 
 namespace HgvMate.Mcp.Search;
@@ -15,10 +13,19 @@ public record SourceChunk(
 
 public record VectorSearchResult(string RepoName, string FilePath, int ChunkIndex, string Content, float Score);
 
+/// <summary>
+/// Stores source code embeddings in a binary file and serves searches from an in-memory cache.
+/// Replaces the previous SQLite-backed implementation to eliminate lock contention on network
+/// filesystems (Azure Files/SMB) where SQLite's locking model is unreliable.
+/// </summary>
 public class VectorStore
 {
-    private readonly ISqliteConnectionFactory _connectionFactory;
+    private static readonly byte[] Magic = "HGVM"u8.ToArray();
+    private const uint FormatVersion = 1;
+
+    private readonly string _storagePath;
     private readonly ILogger<VectorStore> _logger;
+    private readonly Lock _saveLock = new();
 
     // In-memory cache: keyed by (repo_name, file_path, chunk_index)
     private readonly ConcurrentDictionary<(string Repo, string File, int Index), CachedChunk> _cache = new();
@@ -26,239 +33,142 @@ public class VectorStore
 
     internal record CachedChunk(string Content, float[] Embedding);
 
-    public VectorStore(ISqliteConnectionFactory connectionFactory, ILogger<VectorStore> logger)
+    public VectorStore(string storagePath, ILogger<VectorStore> logger)
     {
-        _connectionFactory = connectionFactory;
+        _storagePath = storagePath;
         _logger = logger;
     }
 
-    public async Task EnsureSchemaAsync()
-    {
-        using var conn = _connectionFactory.CreateConnection();
-        await conn.OpenAsync();
-
-        // Check if the table already exists and needs migration from JSON to BLOB
-        var needsMigration = false;
-        var tableExists = false;
-
-        using (var checkCmd = new SqliteCommand(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='source_chunks';", conn))
-        {
-            var result = await checkCmd.ExecuteScalarAsync();
-            if (result is string sql)
-            {
-                tableExists = true;
-                // Old schema stored embeddings as TEXT; new schema uses BLOB
-                needsMigration = sql.Contains("embedding TEXT", StringComparison.OrdinalIgnoreCase);
-            }
-        }
-
-        if (needsMigration)
-        {
-            _logger.LogInformation("Migrating source_chunks from TEXT embeddings to BLOB...");
-            await MigrateTextToBlobAsync(conn);
-        }
-        else if (!tableExists)
-        {
-            const string createSql = """
-                CREATE TABLE IF NOT EXISTS source_chunks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    repo_name TEXT NOT NULL,
-                    file_path TEXT NOT NULL,
-                    chunk_index INTEGER NOT NULL,
-                    content TEXT NOT NULL,
-                    embedding BLOB NOT NULL,
-                    UNIQUE(repo_name, file_path, chunk_index)
-                );
-                CREATE INDEX IF NOT EXISTS idx_chunks_repo ON source_chunks(repo_name);
-                CREATE INDEX IF NOT EXISTS idx_chunks_file ON source_chunks(repo_name, file_path);
-                """;
-            using var cmd = new SqliteCommand(createSql, conn);
-            await cmd.ExecuteNonQueryAsync();
-        }
-
-        await LoadCacheAsync();
-    }
-
-    public async Task LoadCacheAsync()
+    /// <summary>
+    /// Loads the vector cache from the binary file on disk.
+    /// If the file does not exist, starts with an empty cache.
+    /// </summary>
+    public async Task LoadAsync()
     {
         _cache.Clear();
-        using var conn = _connectionFactory.CreateConnection();
-        await conn.OpenAsync();
 
-        const string sql = "SELECT repo_name, file_path, chunk_index, content, embedding FROM source_chunks;";
-        using var cmd = new SqliteCommand(sql, conn);
-        using var reader = await cmd.ExecuteReaderAsync();
-        int count = 0;
-        while (await reader.ReadAsync())
+        if (!File.Exists(_storagePath))
         {
-            var key = (reader.GetString(0), reader.GetString(1), reader.GetInt32(2));
-            var blob = (byte[])reader[4];
-            _cache[key] = new CachedChunk(reader.GetString(3), BlobToFloats(blob));
-            count++;
+            _cacheLoaded = true;
+            _logger.LogInformation("No vector file found at {Path}. Starting with empty cache.", _storagePath);
+            return;
         }
+
+        await Task.Run(() =>
+        {
+            using var fs = new FileStream(_storagePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 1024 * 1024);
+            using var reader = new BinaryReader(fs);
+
+            // Header
+            var magic = reader.ReadBytes(4);
+            if (magic.Length != 4 || magic[0] != Magic[0] || magic[1] != Magic[1] || magic[2] != Magic[2] || magic[3] != Magic[3])
+                throw new InvalidDataException("Invalid vector file: bad magic bytes.");
+
+            var version = reader.ReadUInt32();
+            if (version != FormatVersion)
+                throw new InvalidDataException($"Unsupported vector file version: {version}.");
+
+            var embeddingDim = reader.ReadInt32();
+            var chunkCount = reader.ReadInt32();
+
+            for (var i = 0; i < chunkCount; i++)
+            {
+                var repo = reader.ReadString();
+                var file = reader.ReadString();
+                var chunkIndex = reader.ReadInt32();
+                var content = reader.ReadString();
+
+                var blob = reader.ReadBytes(embeddingDim * sizeof(float));
+                var embedding = BlobToFloats(blob);
+
+                _cache[(repo, file, chunkIndex)] = new CachedChunk(content, embedding);
+            }
+        });
 
         _cacheLoaded = true;
         _logger.LogInformation("Vector cache loaded: {Count} chunks ({SizeMb:F1} MB estimated).",
-            count, count * 5.0 / 1024);
+            _cache.Count, _cache.Count * 5.0 / 1024);
     }
 
-    private async Task MigrateTextToBlobAsync(SqliteConnection conn)
+    /// <summary>
+    /// Persists the entire in-memory cache to the binary file.
+    /// Writes to a temp file first, then atomically replaces the target for crash safety.
+    /// </summary>
+    public async Task SaveAsync()
     {
-        // Rename old table, create new with BLOB, migrate data, drop old
-        using var tx = conn.BeginTransaction();
-        try
+        var snapshot = _cache.ToArray();
+        var embeddingDim = snapshot.Length > 0 ? snapshot[0].Value.Embedding.Length : 384;
+
+        var tempPath = _storagePath + ".tmp";
+
+        await Task.Run(() =>
         {
-            using (var cmd = new SqliteCommand("ALTER TABLE source_chunks RENAME TO source_chunks_old;", conn, tx))
-                await cmd.ExecuteNonQueryAsync();
-
-            using (var cmd = new SqliteCommand("""
-                CREATE TABLE source_chunks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    repo_name TEXT NOT NULL,
-                    file_path TEXT NOT NULL,
-                    chunk_index INTEGER NOT NULL,
-                    content TEXT NOT NULL,
-                    embedding BLOB NOT NULL,
-                    UNIQUE(repo_name, file_path, chunk_index)
-                );
-                CREATE INDEX IF NOT EXISTS idx_chunks_repo ON source_chunks(repo_name);
-                CREATE INDEX IF NOT EXISTS idx_chunks_file ON source_chunks(repo_name, file_path);
-                """, conn, tx))
-                await cmd.ExecuteNonQueryAsync();
-
-            // Read old JSON embeddings and write as BLOB
-            using (var readCmd = new SqliteCommand(
-                "SELECT repo_name, file_path, chunk_index, content, embedding FROM source_chunks_old;", conn, tx))
-            using (var reader = await readCmd.ExecuteReaderAsync())
+            lock (_saveLock)
             {
-                while (await reader.ReadAsync())
+                var dir = Path.GetDirectoryName(_storagePath);
+                if (!string.IsNullOrEmpty(dir))
+                    Directory.CreateDirectory(dir);
+
+                using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 1024 * 1024))
+                using (var writer = new BinaryWriter(fs))
                 {
-                    var jsonEmbedding = reader.GetString(4);
-                    var floats = System.Text.Json.JsonSerializer.Deserialize<float[]>(jsonEmbedding) ?? [];
-                    using var writeCmd = new SqliteCommand("""
-                        INSERT INTO source_chunks (repo_name, file_path, chunk_index, content, embedding)
-                        VALUES (@repo, @file, @idx, @content, @embedding);
-                        """, conn, tx);
-                    writeCmd.Parameters.AddWithValue("@repo", reader.GetString(0));
-                    writeCmd.Parameters.AddWithValue("@file", reader.GetString(1));
-                    writeCmd.Parameters.AddWithValue("@idx", reader.GetInt32(2));
-                    writeCmd.Parameters.AddWithValue("@content", reader.GetString(3));
-                    writeCmd.Parameters.AddWithValue("@embedding", FloatsToBlob(floats));
-                    await writeCmd.ExecuteNonQueryAsync();
+                    // Header
+                    writer.Write(Magic);
+                    writer.Write(FormatVersion);
+                    writer.Write(embeddingDim);
+                    writer.Write(snapshot.Length);
+
+                    foreach (var kv in snapshot)
+                    {
+                        writer.Write(kv.Key.Repo);
+                        writer.Write(kv.Key.File);
+                        writer.Write(kv.Key.Index);
+                        writer.Write(kv.Value.Content);
+                        writer.Write(FloatsToBlob(kv.Value.Embedding));
+                    }
                 }
+
+                // Atomic replace
+                File.Move(tempPath, _storagePath, overwrite: true);
             }
+        });
 
-            using (var cmd = new SqliteCommand("DROP TABLE source_chunks_old;", conn, tx))
-                await cmd.ExecuteNonQueryAsync();
-
-            await tx.CommitAsync();
-            _logger.LogInformation("Migration complete.");
-        }
-        catch
-        {
-            await tx.RollbackAsync();
-            throw;
-        }
+        _logger.LogInformation("Vector store saved: {Count} chunks to {Path}.", snapshot.Length, _storagePath);
     }
 
-    public async Task UpsertChunkAsync(SourceChunk chunk)
+    public void UpsertChunk(SourceChunk chunk)
     {
-        using var conn = _connectionFactory.CreateConnection();
-        await conn.OpenAsync();
-        const string sql = """
-            INSERT INTO source_chunks (repo_name, file_path, chunk_index, content, embedding)
-            VALUES (@repo, @file, @idx, @content, @embedding)
-            ON CONFLICT(repo_name, file_path, chunk_index) DO UPDATE SET
-                content = excluded.content,
-                embedding = excluded.embedding;
-            """;
-        using var cmd = new SqliteCommand(sql, conn);
-        cmd.Parameters.AddWithValue("@repo", chunk.RepoName);
-        cmd.Parameters.AddWithValue("@file", chunk.FilePath);
-        cmd.Parameters.AddWithValue("@idx", chunk.ChunkIndex);
-        cmd.Parameters.AddWithValue("@content", chunk.Content);
-        cmd.Parameters.AddWithValue("@embedding", FloatsToBlob(chunk.Embedding));
-        await cmd.ExecuteNonQueryAsync();
-
         _cache[(chunk.RepoName, chunk.FilePath, chunk.ChunkIndex)] =
             new CachedChunk(chunk.Content, chunk.Embedding);
     }
 
-    public async Task UpsertChunksAsync(IEnumerable<SourceChunk> chunks)
+    public void UpsertChunks(IEnumerable<SourceChunk> chunks)
     {
-        using var conn = _connectionFactory.CreateConnection();
-        await conn.OpenAsync();
-        using var tx = conn.BeginTransaction();
-        const string sql = """
-            INSERT INTO source_chunks (repo_name, file_path, chunk_index, content, embedding)
-            VALUES (@repo, @file, @idx, @content, @embedding)
-            ON CONFLICT(repo_name, file_path, chunk_index) DO UPDATE SET
-                content = excluded.content,
-                embedding = excluded.embedding;
-            """;
         foreach (var chunk in chunks)
         {
-            using var cmd = new SqliteCommand(sql, conn, tx);
-            cmd.Parameters.AddWithValue("@repo", chunk.RepoName);
-            cmd.Parameters.AddWithValue("@file", chunk.FilePath);
-            cmd.Parameters.AddWithValue("@idx", chunk.ChunkIndex);
-            cmd.Parameters.AddWithValue("@content", chunk.Content);
-            cmd.Parameters.AddWithValue("@embedding", FloatsToBlob(chunk.Embedding));
-            await cmd.ExecuteNonQueryAsync();
-
             _cache[(chunk.RepoName, chunk.FilePath, chunk.ChunkIndex)] =
                 new CachedChunk(chunk.Content, chunk.Embedding);
         }
-        await tx.CommitAsync();
     }
 
-    public async Task DeleteChunksForFileAsync(string repoName, string filePath)
+    public void DeleteChunksForFile(string repoName, string filePath)
     {
-        using var conn = _connectionFactory.CreateConnection();
-        await conn.OpenAsync();
-        const string sql = "DELETE FROM source_chunks WHERE repo_name = @repo AND file_path = @file;";
-        using var cmd = new SqliteCommand(sql, conn);
-        cmd.Parameters.AddWithValue("@repo", repoName);
-        cmd.Parameters.AddWithValue("@file", filePath);
-        await cmd.ExecuteNonQueryAsync();
-
-        // Evict from cache
         var keysToRemove = _cache.Keys.Where(k => k.Repo == repoName && k.File == filePath).ToList();
         foreach (var key in keysToRemove)
             _cache.TryRemove(key, out _);
     }
 
-    public async Task DeleteChunksForRepoAsync(string repoName)
+    public void DeleteChunksForRepo(string repoName)
     {
-        using var conn = _connectionFactory.CreateConnection();
-        await conn.OpenAsync();
-        const string sql = "DELETE FROM source_chunks WHERE repo_name = @repo;";
-        using var cmd = new SqliteCommand(sql, conn);
-        cmd.Parameters.AddWithValue("@repo", repoName);
-        await cmd.ExecuteNonQueryAsync();
-
-        // Evict from cache
         var keysToRemove = _cache.Keys.Where(k => k.Repo == repoName).ToList();
         foreach (var key in keysToRemove)
             _cache.TryRemove(key, out _);
     }
 
-    public Task<IReadOnlyList<VectorSearchResult>> SearchAsync(
+    public IReadOnlyList<VectorSearchResult> Search(
         float[] queryVector,
         string? repoName = null,
         int limit = 20)
-    {
-        if (_cacheLoaded)
-            return Task.FromResult(SearchFromCache(queryVector, repoName, limit));
-
-        return SearchFromDatabaseAsync(queryVector, repoName, limit);
-    }
-
-    private IReadOnlyList<VectorSearchResult> SearchFromCache(
-        float[] queryVector,
-        string? repoName,
-        int limit)
     {
         var entries = repoName != null
             ? _cache.Where(kv => kv.Key.Repo == repoName)
@@ -278,63 +188,11 @@ public class VectorStore
             .ToList();
     }
 
-    private async Task<IReadOnlyList<VectorSearchResult>> SearchFromDatabaseAsync(
-        float[] queryVector,
-        string? repoName,
-        int limit)
+    public Dictionary<string, int> GetChunkCounts()
     {
-        using var conn = _connectionFactory.CreateConnection();
-        await conn.OpenAsync();
-
-        var sql = repoName != null
-            ? "SELECT repo_name, file_path, chunk_index, content, embedding FROM source_chunks WHERE repo_name = @repo;"
-            : "SELECT repo_name, file_path, chunk_index, content, embedding FROM source_chunks;";
-
-        using var cmd = new SqliteCommand(sql, conn);
-        if (repoName != null)
-            cmd.Parameters.AddWithValue("@repo", repoName);
-
-        var candidates = new List<(string RepoName, string FilePath, int ChunkIndex, string Content, float Score)>();
-        using var reader = await cmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            var blob = (byte[])reader[4];
-            var embedding = BlobToFloats(blob);
-            var score = CosineSimilarity(queryVector, embedding);
-            candidates.Add((reader.GetString(0), reader.GetString(1), reader.GetInt32(2), reader.GetString(3), score));
-        }
-
-        return candidates
-            .OrderByDescending(c => c.Score)
-            .Take(limit)
-            .Select(c => new VectorSearchResult(c.RepoName, c.FilePath, c.ChunkIndex, c.Content, c.Score))
-            .ToList();
-    }
-
-    public Task<Dictionary<string, int>> GetChunkCountsAsync()
-    {
-        if (_cacheLoaded)
-        {
-            var counts = _cache.Keys
-                .GroupBy(k => k.Repo)
-                .ToDictionary(g => g.Key, g => g.Count());
-            return Task.FromResult(counts);
-        }
-
-        return GetChunkCountsFromDatabaseAsync();
-    }
-
-    private async Task<Dictionary<string, int>> GetChunkCountsFromDatabaseAsync()
-    {
-        using var conn = _connectionFactory.CreateConnection();
-        await conn.OpenAsync();
-        const string sql = "SELECT repo_name, COUNT(*) FROM source_chunks GROUP BY repo_name;";
-        using var cmd = new SqliteCommand(sql, conn);
-        using var reader = await cmd.ExecuteReaderAsync();
-        var counts = new Dictionary<string, int>();
-        while (await reader.ReadAsync())
-            counts[reader.GetString(0)] = reader.GetInt32(1);
-        return counts;
+        return _cache.Keys
+            .GroupBy(k => k.Repo)
+            .ToDictionary(g => g.Key, g => g.Count());
     }
 
     public bool IsCacheLoaded => _cacheLoaded;
@@ -369,5 +227,58 @@ public class VectorStore
         }
         if (normA < 1e-12f || normB < 1e-12f) return 0f;
         return dot / (MathF.Sqrt(normA) * MathF.Sqrt(normB));
+    }
+
+    // ── SQLite migration ────────────────────────────────────────────────
+
+    /// <summary>
+    /// One-time migration: reads all chunks from the legacy SQLite source_chunks table
+    /// into the in-memory cache. Caller should follow with <see cref="SaveAsync"/> to persist.
+    /// </summary>
+    public async Task MigrateFromSqliteAsync(Data.ISqliteConnectionFactory connectionFactory)
+    {
+        _logger.LogInformation("Migrating vector data from SQLite to binary format...");
+        using var conn = connectionFactory.CreateConnection();
+        await conn.OpenAsync();
+
+        // Check if the source_chunks table exists
+        using var checkCmd = new Microsoft.Data.Sqlite.SqliteCommand(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='source_chunks';", conn);
+        var exists = await checkCmd.ExecuteScalarAsync();
+        if (exists is null)
+        {
+            _logger.LogInformation("No source_chunks table found in SQLite. Nothing to migrate.");
+            return;
+        }
+
+        int count = 0;
+        const string sql = "SELECT repo_name, file_path, chunk_index, content, embedding FROM source_chunks;";
+        using var cmd = new Microsoft.Data.Sqlite.SqliteCommand(sql, conn);
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var repo = reader.GetString(0);
+            var file = reader.GetString(1);
+            var idx = reader.GetInt32(2);
+            var content = reader.GetString(3);
+
+            float[] embedding;
+            if (reader.GetFieldType(4) == typeof(byte[]))
+            {
+                embedding = BlobToFloats((byte[])reader[4]);
+            }
+            else
+            {
+                // Legacy TEXT format (JSON array)
+                var json = reader.GetString(4);
+                embedding = System.Text.Json.JsonSerializer.Deserialize<float[]>(json) ?? [];
+            }
+
+            _cache[(repo, file, idx)] = new CachedChunk(content, embedding);
+            count++;
+        }
+
+        _cacheLoaded = true;
+        _logger.LogInformation("Migrated {Count} chunks from SQLite.", count);
     }
 }
