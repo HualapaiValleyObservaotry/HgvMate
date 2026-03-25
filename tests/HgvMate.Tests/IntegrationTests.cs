@@ -82,7 +82,7 @@ public sealed class IntegrationTests
 
         var indexingService = new IndexingService(vectorStore, embedder, reader, searchOptions, NullLogger<IndexingService>.Instance);
         var gitNexus = new GitNexusService(hgvOptions, syncOptions, NullLogger<GitNexusService>.Instance);
-        var syncService = new RepoSyncService(registry, credProvider, hgvOptions, syncOptions, indexingService, gitNexus, NullLogger<RepoSyncService>.Instance);
+        var syncService = new RepoSyncService(registry, credProvider, hgvOptions, syncOptions, indexingService, gitNexus, new HgvMate.Mcp.Configuration.StartupState(), NullLogger<RepoSyncService>.Instance);
 
         var gitGrep = new GitGrepSearchService(registry, reader, searchOptions, NullLogger<GitGrepSearchService>.Instance);
         var hybridSearch = new HybridSearchService(gitGrep, vectorStore, embedder, searchOptions, NullLogger<HybridSearchService>.Instance);
@@ -146,7 +146,7 @@ public sealed class IntegrationTests
         await vectorStore.EnsureSchemaAsync();
         var indexingService = new TrackingIndexingService(vectorStore, embedder, reader, searchOptions);
         var gitNexus = new GitNexusService(hgvOptions, syncOptions, NullLogger<GitNexusService>.Instance);
-        var syncService = new RepoSyncService(registry, credProvider, hgvOptions, syncOptions, indexingService, gitNexus, NullLogger<RepoSyncService>.Instance);
+        var syncService = new RepoSyncService(registry, credProvider, hgvOptions, syncOptions, indexingService, gitNexus, new HgvMate.Mcp.Configuration.StartupState(), NullLogger<RepoSyncService>.Instance);
 
         // ── 3. First sync (full index) ─────────────────────────────────────
         await registry.AddAsync("app", repoUrl, "main", "local");

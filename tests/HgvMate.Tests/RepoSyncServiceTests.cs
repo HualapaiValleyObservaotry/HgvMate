@@ -62,6 +62,7 @@ public sealed class RepoSyncServiceTests
         var svc = new FakeGitRepoSyncService(
             registry, credProvider, hgvOptions, syncOptions,
             trackingIndexing, gitNexus,
+            new HgvMate.Mcp.Configuration.StartupState(),
             NullLogger<RepoSyncService>.Instance,
             gitResponses ?? []);
 
@@ -390,6 +391,7 @@ public sealed class RepoSyncServiceTests
         var svc = new FakeGitRepoSyncService(
             registry, credProvider, hgvOptions, syncOptions,
             trackingIndexing, gitNexus,
+            new HgvMate.Mcp.Configuration.StartupState(),
             NullLogger<RepoSyncService>.Instance, []);
 
         return (svc, trackingIndexing, registry);
@@ -409,9 +411,10 @@ public sealed class RepoSyncServiceTests
             RepoSyncOptions syncOptions,
             IndexingService indexingService,
             GitNexusService gitNexusService,
+            HgvMate.Mcp.Configuration.StartupState startupState,
             Microsoft.Extensions.Logging.ILogger<RepoSyncService> logger,
             Dictionary<string[], (string output, int exit)> responses)
-            : base(registry, credentialProvider, hgvMateOptions, syncOptions, indexingService, gitNexusService, logger)
+            : base(registry, credentialProvider, hgvMateOptions, syncOptions, indexingService, gitNexusService, startupState, logger)
         {
             _responses = responses;
         }
