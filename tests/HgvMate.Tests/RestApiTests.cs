@@ -87,7 +87,7 @@ public sealed class RestApiTests : IDisposable
     }
 
     [TestMethod]
-    public async Task AddRepository_ReturnsCreated()
+    public async Task AddRepository_ReturnsAccepted()
     {
         await using var app = await CreateTestApp();
         var client = app.GetTestClient();
@@ -100,9 +100,11 @@ public sealed class RestApiTests : IDisposable
             source = "github"
         });
 
-        Assert.AreEqual(HttpStatusCode.Created, response.StatusCode);
+        Assert.AreEqual(HttpStatusCode.Accepted, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.AreEqual("test-repo", body.GetProperty("name").GetString());
+        Assert.IsTrue(body.TryGetProperty("syncState", out var syncState));
+        Assert.AreEqual("pending", syncState.GetString());
     }
 
     [TestMethod]

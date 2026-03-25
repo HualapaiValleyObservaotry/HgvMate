@@ -49,6 +49,34 @@ if (useSse)
                          | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost
     });
 
+    app.UseExceptionHandler(errApp =>
+    {
+        errApp.Run(async context =>
+        {
+            var ex = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+            var logger = context.RequestServices.GetRequiredService<ILogger<WebApplication>>();
+            var traceId = System.Diagnostics.Activity.Current?.Id ?? context.TraceIdentifier;
+
+            logger.LogError(ex, "Unhandled exception on {Method} {Path} [traceId={TraceId}]",
+                context.Request.Method, context.Request.Path, traceId);
+
+            bool isBusy = ex is Microsoft.Data.Sqlite.SqliteException sqlex &&
+                          (sqlex.SqliteErrorCode == 5 || sqlex.SqliteErrorCode == 6); // SQLITE_BUSY / SQLITE_LOCKED
+
+            context.Response.ContentType = "application/json";
+            context.Response.StatusCode = isBusy ? 503 : 500;
+            if (isBusy)
+                context.Response.Headers["Retry-After"] = "5";
+
+            await context.Response.WriteAsJsonAsync(new
+            {
+                error = isBusy ? "Service temporarily unavailable." : "An unexpected error occurred.",
+                detail = ex?.Message,
+                traceId
+            });
+        });
+    });
+
     app.MapOpenApi();
     app.MapScalarApiReference();
     app.MapMcp("/mcp");

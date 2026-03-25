@@ -20,7 +20,7 @@ public class DatabaseInitializer
         using var conn = _connectionFactory.CreateConnection();
         await conn.OpenAsync();
 
-        var sql = """
+        var createSql = """
             CREATE TABLE IF NOT EXISTS repositories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
@@ -30,12 +30,37 @@ public class DatabaseInitializer
                 enabled INTEGER NOT NULL DEFAULT 1,
                 last_sha TEXT,
                 last_synced TEXT,
-                added_by TEXT
+                added_by TEXT,
+                last_error TEXT,
+                last_error_at TEXT,
+                failed_sync_count INTEGER NOT NULL DEFAULT 0,
+                sync_state TEXT NOT NULL DEFAULT 'pending'
             );
             """;
 
-        using var cmd = new SqliteCommand(sql, conn);
-        await cmd.ExecuteNonQueryAsync();
+        using var createCmd = new SqliteCommand(createSql, conn);
+        await createCmd.ExecuteNonQueryAsync();
+
+        // Migrate existing databases that predate the error-tracking columns
+        await AddColumnIfMissingAsync(conn, "last_error", "TEXT");
+        await AddColumnIfMissingAsync(conn, "last_error_at", "TEXT");
+        await AddColumnIfMissingAsync(conn, "failed_sync_count", "INTEGER NOT NULL DEFAULT 0");
+        await AddColumnIfMissingAsync(conn, "sync_state", "TEXT NOT NULL DEFAULT 'pending'");
+
         _logger.LogInformation("Database schema initialized.");
+    }
+
+    private static async Task AddColumnIfMissingAsync(SqliteConnection conn, string columnName, string columnDef)
+    {
+        try
+        {
+            var sql = $"ALTER TABLE repositories ADD COLUMN {columnName} {columnDef};";
+            using var cmd = new SqliteCommand(sql, conn);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch (SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+        {
+            // Column already exists — this is the expected case for existing databases
+        }
     }
 }

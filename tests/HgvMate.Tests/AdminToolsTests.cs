@@ -169,6 +169,10 @@ public sealed class AdminToolsTests
             _repos[idx] = _repos[idx] with { Enabled = enabled };
             return Task.FromResult(true);
         }
+
+        public Task<bool> UpdateSyncStateAsync(string name, string state) => Task.FromResult(true);
+        public Task<bool> UpdateSyncErrorAsync(string name, string error) => Task.FromResult(true);
+        public Task<bool> ClearSyncErrorAsync(string name) => Task.FromResult(true);
     }
 
     private sealed class FakeRepoSyncService : RepoSyncService

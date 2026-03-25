@@ -149,7 +149,7 @@ public class AdminTools
                 return "No repositories registered.";
 
             var lines = repos.Select(r =>
-                $"- {r.Name}: enabled={r.Enabled}, sha={r.LastSha ?? "none"}, synced={r.LastSynced ?? "never"}, source={r.Source}");
+                $"- {r.Name}: enabled={r.Enabled}, sha={r.LastSha ?? "none"}, synced={r.LastSynced ?? "never"}, source={r.Source}, state={r.SyncState}{(r.LastError != null ? $", error={r.LastError}" : "")}");
             return string.Join("\n", lines);
         }
         catch (Exception ex)

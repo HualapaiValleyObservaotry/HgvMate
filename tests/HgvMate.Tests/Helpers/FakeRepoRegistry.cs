@@ -38,4 +38,13 @@ internal class FakeRepoRegistry : IRepoRegistry
 
     public Task<bool> SetEnabledAsync(string name, bool enabled)
         => Task.FromResult(true);
+
+    public Task<bool> UpdateSyncStateAsync(string name, string state)
+        => Task.FromResult(true);
+
+    public Task<bool> UpdateSyncErrorAsync(string name, string error)
+        => Task.FromResult(true);
+
+    public Task<bool> ClearSyncErrorAsync(string name)
+        => Task.FromResult(true);
 }

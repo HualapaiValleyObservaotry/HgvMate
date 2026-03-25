@@ -3,6 +3,15 @@ using Microsoft.Extensions.Logging;
 
 namespace HgvMate.Mcp.Search;
 
+/// <summary>Result returned by <see cref="IndexingService.IndexRepoAsync"/>.</summary>
+public record IndexResult(
+    int FilesIndexed,
+    int ChunksCreated,
+    int FilesSkipped,
+    IReadOnlyList<string> SkippedFiles,
+    TimeSpan Duration
+);
+
 public class IndexingService
 {
     private static readonly string[] TextExtensions =
@@ -32,12 +41,13 @@ public class IndexingService
         _logger = logger;
     }
 
-    public virtual async Task IndexRepoAsync(string repoName, CancellationToken cancellationToken = default)
+    public virtual async Task<IndexResult> IndexRepoAsync(string repoName, CancellationToken cancellationToken = default)
     {
+        var started = DateTime.UtcNow;
         if (!_embedder.IsAvailable)
         {
             _logger.LogInformation("Skipping vector indexing for '{Repo}': ONNX model not available.", repoName);
-            return;
+            return new IndexResult(0, 0, 0, [], TimeSpan.Zero);
         }
 
         _logger.LogInformation("Indexing repo '{Repo}' for vector search...", repoName);
@@ -46,13 +56,14 @@ public class IndexingService
         if (!Directory.Exists(repoRoot))
         {
             _logger.LogWarning("Repo '{Repo}' not cloned yet.", repoName);
-            return;
+            return new IndexResult(0, 0, 0, [], TimeSpan.Zero);
         }
 
         await _vectorStore.DeleteChunksForRepoAsync(repoName);
 
         var files = GetIndexableFiles(repoRoot);
-        int fileCount = 0, chunkCount = 0;
+        int fileCount = 0, chunkCount = 0, skippedCount = 0;
+        var skippedFiles = new List<string>();
 
         foreach (var filePath in files)
         {
@@ -77,10 +88,15 @@ public class IndexingService
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to index file '{File}'.", filePath);
+                skippedCount++;
+                skippedFiles.Add(Path.GetRelativePath(repoRoot, filePath));
             }
         }
 
-        _logger.LogInformation("Indexed {Files} files ({Chunks} chunks) for repo '{Repo}'.", fileCount, chunkCount, repoName);
+        var duration = DateTime.UtcNow - started;
+        _logger.LogInformation("Indexed {Files} files ({Chunks} chunks, {Skipped} skipped) for repo '{Repo}' in {Duration}.",
+            fileCount, chunkCount, skippedCount, repoName, duration);
+        return new IndexResult(fileCount, chunkCount, skippedCount, skippedFiles, duration);
     }
 
     public virtual async Task IndexFileAsync(string repoName, string relativePath, CancellationToken cancellationToken = default)
