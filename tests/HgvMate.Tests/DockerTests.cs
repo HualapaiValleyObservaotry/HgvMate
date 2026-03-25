@@ -126,7 +126,7 @@ public sealed class DockerTests
             $"run --rm --entrypoint /bin/sh {ImageName} -c \"test -f /app/models/all-MiniLM-L6-v2.onnx && echo EXISTS || echo MISSING\"",
             timeoutMs: 30_000);
 
-        Assert.IsTrue(result.output.Trim().Contains("EXISTS"),
+        Assert.Contains(result.output.Trim(), "EXISTS",
             $"ONNX model should be baked into the Docker image at /app/models/. Got: {result.output}");
     }
 
@@ -147,7 +147,7 @@ public sealed class DockerTests
             timeoutMs: 30_000);
 
         Assert.AreEqual(0, result.exitCode, $"git should be available in container. Stderr: {result.stderr}");
-        Assert.IsTrue(result.output.Contains("git version"), $"Expected 'git version', got: {result.output}");
+        Assert.Contains(result.output, "git version", $"Expected 'git version', got: {result.output}");
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────

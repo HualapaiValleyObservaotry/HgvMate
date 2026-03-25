@@ -116,17 +116,15 @@ public sealed class McpProtocolTests
             }
 
             // Verify core hgvmate tools are present
-            Assert.IsTrue(toolNames.Any(n => n.StartsWith("hgvmate_")),
-                $"Should have hgvmate_* tools. Found: {string.Join(", ", toolNames)}");
-            Assert.IsTrue(toolNames.Contains("hgvmate_list_repositories"),
+            Assert.Contains("hgvmate_list_repositories", toolNames,
                 "Should contain hgvmate_list_repositories tool.");
-            Assert.IsTrue(toolNames.Contains("hgvmate_search_source_code"),
+            Assert.Contains("hgvmate_search_source_code", toolNames,
                 "Should contain hgvmate_search_source_code tool.");
-            Assert.IsTrue(toolNames.Contains("hgvmate_find_symbol"),
+            Assert.Contains("hgvmate_find_symbol", toolNames,
                 "Should contain hgvmate_find_symbol tool.");
 
             // Verify all 11 expected tools
-            Assert.IsTrue(toolNames.Count >= 11,
+            Assert.IsGreaterThanOrEqualTo(11, toolNames.Count,
                 $"Expected at least 11 hgvmate tools, found {toolNames.Count}: {string.Join(", ", toolNames)}");
         }
         finally

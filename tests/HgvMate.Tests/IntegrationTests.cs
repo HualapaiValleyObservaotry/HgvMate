@@ -171,7 +171,7 @@ public sealed class IntegrationTests
         // With shallow clones, diff may not work → falls back to full re-index.
         // Either way, re-indexing must have been triggered.
         var totalIndexCalls = indexingService.IndexRepoCalls + indexingService.IndexFileCalls;
-        Assert.IsTrue(totalIndexCalls > firstRepoIndexCalls,
+        Assert.IsGreaterThan(firstRepoIndexCalls, totalIndexCalls,
             "Second sync should trigger re-indexing when content changed.");
     }
 

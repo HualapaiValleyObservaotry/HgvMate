@@ -28,8 +28,8 @@ public sealed class OnnxEmbedderTests
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null,
             NullLogger<OnnxEmbedder>.Instance);
         var result = await embedder.EmbedAsync("hello world");
-        Assert.AreEqual(384, result.Length);
-        Assert.IsTrue(result.All(v => v == 0f));
+        Assert.HasCount(384, result);
+        Assert.IsTrue(result.All(static v => v == 0f));
     }
 
     // ─── Tokenizer regression tests ──────────────────────────────────────────
@@ -71,7 +71,7 @@ public sealed class OnnxEmbedderTests
     {
         var longInput = string.Join(" ", Enumerable.Range(0, 500).Select(i => $"word{i}"));
         var tokens = OnnxEmbedder.SimpleTokenize(longInput);
-        Assert.IsTrue(tokens.Length <= 128, $"Token count {tokens.Length} exceeds max 128");
+        Assert.IsLessThanOrEqualTo(128, tokens.Length, $"Token count {tokens.Length} exceeds max 128");
     }
 
     [TestMethod]
