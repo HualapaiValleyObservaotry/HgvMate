@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using HgvMate.Mcp.Configuration;
 using HgvMate.Mcp.Search;
+using HVO.Enterprise.Telemetry.Abstractions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -14,6 +16,7 @@ public class RepoSyncService : BackgroundService
     private readonly IndexingService _indexingService;
     private readonly GitNexusService _gitNexusService;
     private readonly StartupState _startupState;
+    private readonly ITelemetryService? _telemetry;
     private readonly ILogger<RepoSyncService> _logger;
 
     // Limit concurrent syncs to prevent OOM from unbounded parallel git clones + ONNX indexing
@@ -29,7 +32,8 @@ public class RepoSyncService : BackgroundService
         IndexingService indexingService,
         GitNexusService gitNexusService,
         StartupState startupState,
-        ILogger<RepoSyncService> logger)
+        ILogger<RepoSyncService> logger,
+        ITelemetryService? telemetry = null)
     {
         _registry = registry;
         _credentialProvider = credentialProvider;
@@ -38,6 +42,7 @@ public class RepoSyncService : BackgroundService
         _indexingService = indexingService;
         _gitNexusService = gitNexusService;
         _startupState = startupState;
+        _telemetry = telemetry;
         _logger = logger;
     }
 
@@ -98,6 +103,7 @@ public class RepoSyncService : BackgroundService
         var clonePath = GetClonePath(repo.Name);
         _logger.LogInformation("Syncing repo '{Name}' to '{Path}'...", repo.Name, clonePath);
         await _registry.UpdateSyncStateAsync(repo.Name, SyncStates.Syncing);
+        var sw = Stopwatch.StartNew();
 
         try
         {
@@ -164,9 +170,12 @@ public class RepoSyncService : BackgroundService
             }
 
             await _registry.ClearSyncErrorAsync(repo.Name);
+            _telemetry?.RecordMetric("hgvmate.repo.sync_duration_ms", sw.Elapsed.TotalMilliseconds);
+            _telemetry?.TrackEvent("hgvmate.repo.sync_completed");
         }
         catch (Exception ex)
         {
+            _telemetry?.TrackException(ex);
             _logger.LogError(ex, "Failed to sync repo '{Name}'.", repo.Name);
             await _registry.UpdateSyncErrorAsync(repo.Name, ex.Message);
         }

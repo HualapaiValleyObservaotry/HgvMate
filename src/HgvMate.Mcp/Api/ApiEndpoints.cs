@@ -1,6 +1,8 @@
 using HgvMate.Mcp.Configuration;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
+using HVO.Enterprise.Telemetry.Abstractions;
+using HVO.Enterprise.Telemetry.Correlation;
 using Microsoft.AspNetCore.Http.HttpResults;
 
 namespace HgvMate.Mcp.Api;
@@ -14,6 +16,7 @@ public static class ApiEndpoints
         var api = app.MapGroup("/api");
 
         MapHealthEndpoint(app);
+        MapDiagnosticsEndpoint(app);
         MapRepositoryEndpoints(api);
         MapSearchEndpoints(api);
         MapStructuralEndpoints(api);
@@ -328,6 +331,36 @@ public static class ApiEndpoints
             return Results.Ok(new { symbol = name, repository, result });
         })
         .WithSummary("Get the blast radius for a symbol");
+    }
+
+    // ── Diagnostics (telemetry statistics) ───────────────────────────────
+
+    private static void MapDiagnosticsEndpoint(WebApplication app)
+    {
+        app.MapGet("/diagnostics", (ITelemetryService telemetry) =>
+        {
+            var stats = telemetry.Statistics;
+            var snapshot = stats.GetSnapshot();
+
+            return Results.Ok(new
+            {
+                Uptime = snapshot.Uptime.ToString(@"d\.hh\:mm\:ss"),
+                ActivitiesCreated = snapshot.ActivitiesCreated,
+                ActivitiesCompleted = snapshot.ActivitiesCompleted,
+                ActiveActivities = snapshot.ActiveActivities,
+                ExceptionsTracked = snapshot.ExceptionsTracked,
+                EventsRecorded = snapshot.EventsRecorded,
+                MetricsRecorded = snapshot.MetricsRecorded,
+                QueueDepth = snapshot.QueueDepth,
+                ItemsProcessed = snapshot.ItemsProcessed,
+                ItemsDropped = snapshot.ItemsDropped,
+                ErrorRate = $"{snapshot.CurrentErrorRate:F2}/min",
+                Throughput = $"{snapshot.CurrentThroughput:F2}/sec",
+                CorrelationId = CorrelationContext.Current
+            });
+        })
+        .WithTags("System")
+        .WithSummary("Live telemetry statistics — activities, errors, queue depth, throughput");
     }
 }
 

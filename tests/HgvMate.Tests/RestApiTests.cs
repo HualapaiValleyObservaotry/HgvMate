@@ -7,6 +7,7 @@ using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
 using HgvMate.Mcp.Tools;
+using HVO.Enterprise.Telemetry;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
@@ -296,6 +297,12 @@ public sealed class RestApiTests : IDisposable
         builder.Services.AddSingleton<VectorStore>();
         builder.Services.AddSingleton<IndexingService>();
         builder.Services.AddSingleton<HybridSearchService>();
+
+        builder.Services.AddTelemetry(options =>
+        {
+            options.ServiceName = "HgvMate.Tests";
+            options.Enabled = true;
+        });
 
         builder.Services.AddOpenApi();
 
