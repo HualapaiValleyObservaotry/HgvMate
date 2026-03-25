@@ -10,6 +10,9 @@ using Microsoft.Extensions.Logging;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+// Redirect all console logging to stderr so stdout is reserved for MCP JSON-RPC messages
+builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
+
 // Configuration
 var hgvMateOptions = new HgvMateOptions();
 builder.Configuration.GetSection(HgvMateOptions.SectionName).Bind(hgvMateOptions);
