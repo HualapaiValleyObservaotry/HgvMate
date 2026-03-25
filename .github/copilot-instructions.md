@@ -47,8 +47,16 @@ When working on issues assigned to `copilot-swe-agent`, follow this workflow:
 1. **Create a feature branch** from `main` — do not work directly on `main`
 2. **Make changes** with accompanying tests at the appropriate level (Unit, Docker, Integration)
 3. **Run `dotnet test`** and fix any failures before opening a PR
-4. **Open a regular PR** (not a draft PR) — draft PRs will not trigger the required review workflow
-5. **Wait for the automated code review** to complete — do not merge until review feedback is addressed
-6. **Address all review comments** — push fix commits to the same branch
-7. **Do not force-push** or rewrite history on the PR branch
-8. **Ensure CI passes** (GitHub Actions: Docker build + publish) before merge
+4. **Open a regular PR** (not a draft PR) — **NEVER open a draft PR**. Draft PRs do not trigger the required automated review workflow and will block the process
+5. **Wait for the automated code review** to complete — this is a **blocking requirement**. Do not merge, do not close, do not mark as done until the automated review has finished and posted its comments
+6. **Address all review comments** — read every comment from the automated review, make the requested changes, and push fix commits to the same branch. Do not dismiss or ignore review feedback
+7. **After addressing comments, wait again** — the review may run another pass after your fixes. Repeat steps 5–6 until the review is clean
+8. **Do not force-push** or rewrite history on the PR branch
+9. **Ensure CI passes** (GitHub Actions: Docker build + publish) before merge
+10. **Only merge after**: all review comments are resolved AND CI is green
+
+### Environment Setup for CI
+
+The Copilot coding agent CI environment has a firewall that blocks outbound connections by default. If tests or builds need to download external resources, those URLs must be allowlisted in the repository's [Copilot coding agent settings](https://github.com/RoySalisbury/HgvMate/settings/copilot/coding_agent). Currently allowlisted:
+- `huggingface.co` — ONNX model downloads
+- `registry.npmjs.org` — npm packages for GitNexus
