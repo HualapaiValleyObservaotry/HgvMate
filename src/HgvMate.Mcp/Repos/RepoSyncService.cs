@@ -242,6 +242,10 @@ public class RepoSyncService : BackgroundService
     /// </summary>
     internal static bool IsTransientError(Exception ex)
     {
+        // Cancellations are not transient — propagate immediately
+        if (ex is OperationCanceledException)
+            return false;
+
         var msg = ex.Message.ToLowerInvariant();
 
         // Permanent errors — do not retry

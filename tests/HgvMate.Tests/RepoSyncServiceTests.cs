@@ -351,6 +351,20 @@ public sealed class RepoSyncServiceTests
         svc.EnsureSufficientDiskSpace(_tempDir);
     }
 
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void IsTransientError_ReturnsFalse_ForOperationCanceledException()
+    {
+        Assert.IsFalse(RepoSyncService.IsTransientError(new OperationCanceledException()));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void IsTransientError_ReturnsFalse_ForTaskCanceledException()
+    {
+        Assert.IsFalse(RepoSyncService.IsTransientError(new TaskCanceledException()));
+    }
+
     private (RepoSyncService service, TrackingIndexingService indexing, TrackingRegistry registry)
         BuildServiceWithMinDiskSpace(string tempDir, long minMb)
     {
