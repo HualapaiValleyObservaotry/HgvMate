@@ -57,6 +57,16 @@ if (useSse)
                          | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost
     });
 
+    // Correlation ID middleware — assigns/propagates X-Correlation-ID (before exception handler)
+    app.Use(async (context, next) =>
+    {
+        var correlationId = context.Request.Headers["X-Correlation-ID"].FirstOrDefault()
+            ?? Guid.NewGuid().ToString("N");
+        using var scope = CorrelationContext.BeginScope(correlationId);
+        context.Response.Headers["X-Correlation-ID"] = correlationId;
+        await next();
+    });
+
     app.UseExceptionHandler(errApp =>
     {
         errApp.Run(async context =>
@@ -84,16 +94,6 @@ if (useSse)
                 traceId
             });
         });
-    });
-
-    // Correlation ID middleware — assigns/propagates X-Correlation-ID
-    app.Use(async (context, next) =>
-    {
-        var correlationId = context.Request.Headers["X-Correlation-ID"].FirstOrDefault()
-            ?? Guid.NewGuid().ToString("N");
-        using var scope = CorrelationContext.BeginScope(correlationId);
-        context.Response.Headers["X-Correlation-ID"] = correlationId;
-        await next();
     });
 
     app.MapOpenApi();
@@ -176,13 +176,16 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
         options.RecordConnectionInfo = false;
     });
 
-    var otlpEndpoint = configuration["Telemetry:OtlpEndpoint"];
+    var telemetrySection = configuration.GetSection("Telemetry");
+    var serviceName = telemetrySection["ServiceName"] ?? "HgvMate";
+    var serviceVersion = telemetrySection["ServiceVersion"] ?? "1.0.0";
+    var otlpEndpoint = telemetrySection["OtlpEndpoint"] ?? configuration["Telemetry:OtlpEndpoint"];
     if (!string.IsNullOrEmpty(otlpEndpoint))
     {
         services.AddOpenTelemetryExport(options =>
         {
-            options.ServiceName = "HgvMate";
-            options.ServiceVersion = "1.0.0";
+            options.ServiceName = serviceName;
+            options.ServiceVersion = serviceVersion;
             options.Endpoint = otlpEndpoint;
             options.EnableTraceExport = true;
             options.EnableMetricsExport = true;

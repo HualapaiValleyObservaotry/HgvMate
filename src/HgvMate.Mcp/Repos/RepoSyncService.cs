@@ -170,14 +170,18 @@ public class RepoSyncService : BackgroundService
             }
 
             await _registry.ClearSyncErrorAsync(repo.Name);
-            _telemetry?.RecordMetric("hgvmate.repo.sync_duration_ms", sw.Elapsed.TotalMilliseconds);
             _telemetry?.TrackEvent("hgvmate.repo.sync_completed");
         }
         catch (Exception ex)
         {
             _telemetry?.TrackException(ex);
+            _telemetry?.TrackEvent("hgvmate.repo.sync_failed");
             _logger.LogError(ex, "Failed to sync repo '{Name}'.", repo.Name);
             await _registry.UpdateSyncErrorAsync(repo.Name, ex.Message);
+        }
+        finally
+        {
+            _telemetry?.RecordMetric("hgvmate.repo.sync_duration_ms", sw.Elapsed.TotalMilliseconds);
         }
     }
 

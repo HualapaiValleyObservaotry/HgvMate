@@ -43,26 +43,30 @@ public class HybridSearchService
         var grepTask = _grepService.SearchAsync(query, repositoryName, cancellationToken);
         var vectorTask = SearchVectorAsync(query, repositoryName, cancellationToken);
 
-        await Task.WhenAll(grepTask, vectorTask);
-
-        var results = new List<SearchResult>();
-        foreach (var r in grepTask.Result)
-            results.Add(new SearchResult(r.RepoName, r.FilePath, r.LineNumber, r.LineContent, 1.0f));
-
-        var existingFiles = results.Select(r => (r.RepoName, r.FilePath)).ToHashSet();
-        foreach (var r in vectorTask.Result)
+        try
         {
-            if (!existingFiles.Contains((r.RepoName, r.FilePath)))
-                results.Add(new SearchResult(r.RepoName, r.FilePath, 0, r.Content, r.Score));
+            await Task.WhenAll(grepTask, vectorTask);
+
+            var results = new List<SearchResult>();
+            foreach (var r in grepTask.Result)
+                results.Add(new SearchResult(r.RepoName, r.FilePath, r.LineNumber, r.LineContent, 1.0f));
+
+            var existingFiles = results.Select(r => (r.RepoName, r.FilePath)).ToHashSet();
+            foreach (var r in vectorTask.Result)
+            {
+                if (!existingFiles.Contains((r.RepoName, r.FilePath)))
+                    results.Add(new SearchResult(r.RepoName, r.FilePath, 0, r.Content, r.Score));
+            }
+
+            return results
+                .OrderByDescending(r => r.Score)
+                .Take(_searchOptions.MaxResults)
+                .ToList();
         }
-
-        var finalResults = results
-            .OrderByDescending(r => r.Score)
-            .Take(_searchOptions.MaxResults)
-            .ToList();
-
-        _telemetry?.RecordMetric("hgvmate.search.duration_ms", sw.Elapsed.TotalMilliseconds);
-        return finalResults;
+        finally
+        {
+            _telemetry?.RecordMetric("hgvmate.search.duration_ms", sw.Elapsed.TotalMilliseconds);
+        }
     }
 
     private async Task<IReadOnlyList<VectorSearchResult>> SearchVectorAsync(

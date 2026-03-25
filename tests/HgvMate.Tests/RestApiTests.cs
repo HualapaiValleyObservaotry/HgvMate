@@ -264,6 +264,20 @@ public sealed class RestApiTests : IDisposable
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
     }
 
+    [TestMethod]
+    public async Task Diagnostics_ReturnsOk_WithExpectedFields()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/diagnostics");
+
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.IsTrue(body.TryGetProperty("uptime", out _));
+        Assert.IsTrue(body.TryGetProperty("queueDepth", out _));
+    }
+
     // ── Test app factory ────────────────────────────────────────────────
 
     private async Task<WebApplication> CreateTestApp(bool markReady = true)
