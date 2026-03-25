@@ -231,7 +231,7 @@ public class RepoSyncService : BackgroundService
         }
 
         if (lastException != null)
-            throw lastException;
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(lastException).Throw();
 
         throw new InvalidOperationException($"{operationName} failed for repo '{repoName}' after all retry attempts.");
     }
@@ -242,6 +242,10 @@ public class RepoSyncService : BackgroundService
     /// </summary>
     internal static bool IsTransientError(Exception ex)
     {
+        // Cancellations are not transient — propagate immediately
+        if (ex is OperationCanceledException)
+            return false;
+
         var msg = ex.Message.ToLowerInvariant();
 
         // Permanent errors — do not retry
@@ -267,8 +271,7 @@ public class RepoSyncService : BackgroundService
             msg.Contains("503") ||
             msg.Contains("temporary") ||
             ex is IOException ||
-            ex is TimeoutException ||
-            ex is OperationCanceledException)
+            ex is TimeoutException)
         {
             return true;
         }

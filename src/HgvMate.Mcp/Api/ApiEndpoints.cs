@@ -51,7 +51,8 @@ public static class ApiEndpoints
                 FailedSyncCount = r.FailedSyncCount
             }).ToList();
 
-            var synced = repos.Count(r => r.LastSynced != null);
+            var synced = repos.Count(r => r.SyncState == SyncStates.Synced);
+            var pending = repos.Count(r => r.SyncState is SyncStates.Pending or SyncStates.Syncing);
             var failedRepos = repos.Count(r => r.SyncState == SyncStates.Failed);
             var totalChunks = chunkCounts.Values.Sum();
 
@@ -92,7 +93,7 @@ public static class ApiEndpoints
                 {
                     Total = repos.Count,
                     Synced = synced,
-                    Pending = repos.Count - synced,
+                    Pending = pending,
                     Failed = failedRepos,
                     TotalIndexedChunks = totalChunks,
                     Details = repoStatuses

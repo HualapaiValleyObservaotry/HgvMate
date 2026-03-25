@@ -4,6 +4,7 @@ using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
 using HgvMate.Mcp.Tools;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -68,10 +69,11 @@ if (useSse)
             if (isBusy)
                 context.Response.Headers["Retry-After"] = "5";
 
+            var isDev = app.Environment.IsDevelopment();
             await context.Response.WriteAsJsonAsync(new
             {
                 error = isBusy ? "Service temporarily unavailable." : "An unexpected error occurred.",
-                detail = ex?.Message,
+                detail = isBusy || isDev ? ex?.Message : null,
                 traceId
             });
         });
@@ -129,6 +131,10 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
 
     Directory.CreateDirectory(dataPath);
     Directory.CreateDirectory(Path.Combine(dataPath, repoSyncOptions.ClonePath));
+
+    var keysDir = new DirectoryInfo(Path.Combine(dataPath, "DataProtection-Keys"));
+    services.AddDataProtection()
+        .PersistKeysToFileSystem(keysDir);
 
     var dbPath = Path.Combine(dataPath, "hgvmate.db");
     var connectionString = $"Data Source={dbPath}";

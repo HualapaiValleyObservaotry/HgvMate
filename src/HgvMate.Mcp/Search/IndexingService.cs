@@ -96,7 +96,7 @@ public class IndexingService
         var duration = DateTime.UtcNow - started;
         _logger.LogInformation("Indexed {Files} files ({Chunks} chunks, {Skipped} skipped) for repo '{Repo}' in {Duration}.",
             fileCount, chunkCount, skippedCount, repoName, duration);
-        return new IndexResult(fileCount, chunkCount, skippedCount, skippedFiles, duration);
+        return new IndexResult(fileCount, chunkCount, skippedCount, skippedFiles.AsReadOnly(), duration);
     }
 
     public virtual async Task IndexFileAsync(string repoName, string relativePath, CancellationToken cancellationToken = default)
