@@ -71,7 +71,10 @@ public class RepoSyncService : BackgroundService
 
         try
         {
-            if (!Directory.Exists(Path.Combine(clonePath, ".git")))
+            var oldSha = repo.LastSha;
+            bool isFirstSync = !Directory.Exists(Path.Combine(clonePath, ".git"));
+
+            if (isFirstSync)
             {
                 await CloneRepoAsync(repo, clonePath, cancellationToken);
             }
@@ -80,27 +83,79 @@ public class RepoSyncService : BackgroundService
                 await PullRepoAsync(repo, clonePath, cancellationToken);
             }
 
-            var sha = await GetCurrentShaAsync(clonePath, cancellationToken);
-            if (!string.IsNullOrEmpty(sha))
-                await _registry.UpdateLastShaAsync(repo.Name, sha);
+            var newSha = await GetCurrentShaAsync(clonePath, cancellationToken);
+            if (!string.IsNullOrEmpty(newSha))
+                await _registry.UpdateLastShaAsync(repo.Name, newSha);
 
             await _registry.UpdateLastSyncedAsync(repo.Name, DateTime.UtcNow);
-            _logger.LogInformation("Repo '{Name}' synced successfully (SHA: {Sha}).", repo.Name, sha ?? "unknown");
+            _logger.LogInformation("Repo '{Name}' synced successfully (SHA: {Sha}).", repo.Name, newSha ?? "unknown");
 
-            await _indexingService.IndexRepoAsync(repo.Name, cancellationToken);
-
-            try
+            if (isFirstSync || string.IsNullOrEmpty(oldSha))
             {
-                await _gitNexusService.AnalyzeAsync(repo.Name, cancellationToken);
+                // First sync: full index
+                await _indexingService.IndexRepoAsync(repo.Name, cancellationToken);
+                await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
             }
-            catch (Exception ex)
+            else if (oldSha != newSha && !string.IsNullOrEmpty(newSha))
             {
-                _logger.LogWarning(ex, "GitNexus analysis failed for '{Name}'; continuing.", repo.Name);
+                // Changes detected: try incremental re-index
+                var changedFiles = await GetChangedFilesAsync(clonePath, oldSha, newSha, cancellationToken);
+                if (changedFiles.Count > 0)
+                {
+                    _logger.LogInformation("{Count} changed file(s) detected in '{Name}'. Re-indexing incrementally.", changedFiles.Count, repo.Name);
+                    foreach (var file in changedFiles)
+                    {
+                        if (cancellationToken.IsCancellationRequested) break;
+                        await _indexingService.IndexFileAsync(repo.Name, file, cancellationToken);
+                    }
+                    await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
+                }
+                else
+                {
+                    // Diff failed or returned nothing (e.g. shallow history); fall back to full re-index
+                    _logger.LogInformation("Could not determine changed files for '{Name}'; falling back to full re-index.", repo.Name);
+                    await _indexingService.IndexRepoAsync(repo.Name, cancellationToken);
+                    await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
+                }
+            }
+            else
+            {
+                _logger.LogInformation("Repo '{Name}' is up-to-date (SHA: {Sha}). Skipping re-index.", repo.Name, newSha);
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to sync repo '{Name}'.", repo.Name);
+        }
+    }
+
+    internal async Task<IReadOnlyList<string>> GetChangedFilesAsync(
+        string clonePath, string oldSha, string newSha, CancellationToken cancellationToken = default)
+    {
+        var (output, exitCode) = await RunGitAsync(
+            ["diff", "--name-only", $"{oldSha}..{newSha}"],
+            clonePath,
+            cancellationToken);
+
+        if (exitCode != 0)
+            return [];
+
+        return output
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(f => f.Trim())
+            .Where(f => !string.IsNullOrWhiteSpace(f))
+            .ToList();
+    }
+
+    private async Task RunGitNexusAnalysisAsync(string repoName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _gitNexusService.AnalyzeAsync(repoName, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "GitNexus analysis failed for '{Name}'; continuing.", repoName);
         }
     }
 
@@ -126,7 +181,7 @@ public class RepoSyncService : BackgroundService
         return output.Trim();
     }
 
-    private async Task<(string output, int exitCode)> RunGitAsync(
+    protected virtual async Task<(string output, int exitCode)> RunGitAsync(
         string[] args,
         string workingDirectory,
         CancellationToken cancellationToken)
