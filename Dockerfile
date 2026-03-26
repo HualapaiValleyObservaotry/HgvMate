@@ -20,11 +20,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js 22 (required by GitNexus / @ladybugdb/core which needs Node 20+ and glibc 2.38+)
-# Install build tools for native modules (tree-sitter), then remove after npm install
+# Build tools are needed for tree-sitter native modules but purging them cascades to nodejs,
+# so we simply leave them installed (adds ~100 MB to image, acceptable for correctness).
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs make g++ python3 && \
     npm install -g gitnexus@latest && \
-    apt-get purge -y make g++ python3 && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

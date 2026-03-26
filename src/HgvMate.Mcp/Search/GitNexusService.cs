@@ -153,8 +153,8 @@ public class GitNexusService
             using var process = new System.Diagnostics.Process();
             process.StartInfo = new System.Diagnostics.ProcessStartInfo
             {
-                FileName = "npx",
-                Arguments = $"gitnexus {args}",
+                FileName = "gitnexus",
+                Arguments = args,
                 WorkingDirectory = workingDirectory,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -166,7 +166,7 @@ public class GitNexusService
             await process.WaitForExitAsync(cancellationToken);
 
             if (process.ExitCode != 0)
-                _logger.LogWarning("npx gitnexus {Args} failed (code {Code}): {Error}", args, process.ExitCode, error);
+                _logger.LogWarning("gitnexus {Args} failed (code {Code}): {Error}", args, process.ExitCode, error);
 
             return output;
         }
