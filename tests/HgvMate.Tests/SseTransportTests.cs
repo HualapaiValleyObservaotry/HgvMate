@@ -3,14 +3,12 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using HgvMate.Mcp.Configuration;
-using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
 using HgvMate.Mcp.Tools;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -25,19 +23,13 @@ namespace HgvMate.Tests;
 public sealed class SseTransportTests : IDisposable
 {
     private string _tempDir = null!;
-    private SqliteConnection _conn = null!;
-    private static int _counter;
 
     [TestInitialize]
-    public async Task Setup()
+    public void Setup()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), "HgvMateSse_" + Path.GetRandomFileName());
         Directory.CreateDirectory(_tempDir);
         Directory.CreateDirectory(Path.Combine(_tempDir, "repos"));
-
-        var id = System.Threading.Interlocked.Increment(ref _counter);
-        _conn = new SqliteConnection($"Data Source=ssetest{id};Mode=Memory;Cache=Shared");
-        await _conn.OpenAsync();
     }
 
     [TestCleanup]
@@ -48,7 +40,6 @@ public sealed class SseTransportTests : IDisposable
 
     public void Dispose()
     {
-        _conn?.Dispose();
         if (_tempDir != null && Directory.Exists(_tempDir))
             Directory.Delete(_tempDir, recursive: true);
     }
@@ -121,16 +112,13 @@ public sealed class SseTransportTests : IDisposable
         var searchOptions = new SearchOptions { MaxResults = 10 };
         var credOptions = new CredentialOptions();
 
-        var connFactory = new TestConnFactory(_conn.ConnectionString);
-
         builder.Services.AddSingleton(hgvOptions);
         builder.Services.AddSingleton(syncOptions);
         builder.Services.AddSingleton(searchOptions);
         builder.Services.AddSingleton(credOptions);
-        builder.Services.AddSingleton<ISqliteConnectionFactory>(connFactory);
-        builder.Services.AddSingleton<DatabaseInitializer>();
         builder.Services.AddSingleton<IGitCredentialProvider, GitCredentialProvider>();
-        builder.Services.AddSingleton<IRepoRegistry, SqliteRepoRegistry>();
+        builder.Services.AddSingleton<IRepoRegistry>(sp =>
+            new JsonRepoRegistry(_tempDir, sp.GetRequiredService<ILoggerFactory>().CreateLogger<JsonRepoRegistry>()));
         var startupState = new StartupState();
         builder.Services.AddSingleton(startupState);
         builder.Services.AddSingleton<RepoSyncService>();
@@ -153,9 +141,6 @@ public sealed class SseTransportTests : IDisposable
 
         var app = builder.Build();
 
-        var dbInit = app.Services.GetRequiredService<DatabaseInitializer>();
-        await dbInit.InitializeAsync();
-
         var vectorStore = app.Services.GetRequiredService<VectorStore>();
         await vectorStore.LoadAsync();
 
@@ -168,12 +153,5 @@ public sealed class SseTransportTests : IDisposable
         await app.StartAsync();
 
         return app;
-    }
-
-    private sealed class TestConnFactory : ISqliteConnectionFactory
-    {
-        private readonly string _connStr;
-        public TestConnFactory(string connStr) => _connStr = connStr;
-        public SqliteConnection CreateConnection() => new(_connStr);
     }
 }
