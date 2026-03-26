@@ -9,13 +9,16 @@ using HVO.Enterprise.Telemetry.Abstractions;
 using HVO.Enterprise.Telemetry.Correlation;
 using HVO.Enterprise.Telemetry.HealthChecks;
 using HVO.Enterprise.Telemetry.Logging;
-using HVO.Enterprise.Telemetry.OpenTelemetry;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Scalar.AspNetCore;
 
 // ── Enable OpenTelemetry SDK self-diagnostics for troubleshooting ────────────
@@ -170,26 +173,34 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
         ?? Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
     if (!string.IsNullOrEmpty(otlpEndpoint))
     {
-        var otlpTransport = "gRPC";
+        // Auto-detect transport from endpoint: port 4318 = HTTP/protobuf, otherwise gRPC
+        var otlpProtocol = OtlpExportProtocol.Grpc;
+        var otlpTransportLabel = "gRPC";
         if (Uri.TryCreate(otlpEndpoint, UriKind.Absolute, out var parsedUri) && parsedUri.Port == 4318)
         {
-            otlpTransport = "HTTP/protobuf";
+            otlpProtocol = OtlpExportProtocol.HttpProtobuf;
+            otlpTransportLabel = "HTTP/protobuf";
         }
-        Console.WriteLine($"[OTLP] Configuring OpenTelemetry export: endpoint={otlpEndpoint}, transport={otlpTransport}, service={serviceName}");
-        services.AddOpenTelemetryExport(options =>
-        {
-            options.ServiceName = serviceName;
-            options.ServiceVersion = serviceVersion;
-            options.Endpoint = otlpEndpoint;
-            // Auto-detect transport from endpoint: port 4318 = HTTP/protobuf, otherwise gRPC
-            if (otlpTransport == "HTTP/protobuf")
+        Console.WriteLine($"[OTLP] Configuring OpenTelemetry export: endpoint={otlpEndpoint}, transport={otlpTransportLabel}, service={serviceName}");
+
+        var otlpUri = new Uri(otlpEndpoint);
+        services.AddOpenTelemetry()
+            .ConfigureResource(r => r.AddService(serviceName, serviceVersion: serviceVersion))
+            .UseOtlpExporter(otlpProtocol, otlpUri)
+            .WithTracing(b =>
             {
-                options.Transport = HVO.Enterprise.Telemetry.OpenTelemetry.OtlpTransport.HttpProtobuf;
-            }
-            options.EnableTraceExport = true;
-            options.EnableMetricsExport = true;
-            options.EnableLogExport = true;
-        });
+                b.AddSource("HgvMate");
+                b.AddAspNetCoreInstrumentation();
+                b.AddHttpClientInstrumentation();
+            })
+            .WithMetrics(b =>
+            {
+                b.AddMeter("HgvMate");
+                b.AddMeter("Microsoft.AspNetCore.Hosting");
+                b.AddMeter("Microsoft.AspNetCore.Server.Kestrel");
+                b.AddMeter("System.Net.Http");
+            })
+            .WithLogging();
     }
     else
     {
