@@ -32,6 +32,33 @@ public sealed class ConfigurationTests
     }
 
     [TestMethod]
+    [TestCategory("Unit")]
+    public void ResolveCloneRoot_RelativePath_CombinesWithDataPath()
+    {
+        var options = new RepoSyncOptions { ClonePath = "repos" };
+        var result = options.ResolveCloneRoot("/data");
+        Assert.AreEqual(Path.Combine("/data", "repos"), result);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void ResolveCloneRoot_AbsolutePath_ReturnsUnchanged()
+    {
+        var options = new RepoSyncOptions { ClonePath = "/tmp/hgvmate/repos" };
+        var result = options.ResolveCloneRoot("/data");
+        Assert.AreEqual("/tmp/hgvmate/repos", result);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void ResolveCloneRoot_NestedRelativePath_CombinesWithDataPath()
+    {
+        var options = new RepoSyncOptions { ClonePath = "local/repos" };
+        var result = options.ResolveCloneRoot("/var/hgvmate");
+        Assert.AreEqual(Path.Combine("/var/hgvmate", "local/repos"), result);
+    }
+
+    [TestMethod]
     public void HgvMateOptions_CanBindFromConfiguration()
     {
         var config = new ConfigurationBuilder()
