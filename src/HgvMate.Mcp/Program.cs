@@ -15,7 +15,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using OpenTelemetry;
 using Scalar.AspNetCore;
+
+// ── Enable OpenTelemetry SDK self-diagnostics for troubleshooting ────────────
+AppContext.SetSwitch("OpenTelemetry.Experimental.Sdk.SelfDiagnostics", true);
 
 // ── Determine transport before building the host ────────────────────────────
 var preConfig = new ConfigurationBuilder()
