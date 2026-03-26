@@ -27,8 +27,8 @@ public sealed class RepoSyncServiceTests
 
     // ─── helpers ────────────────────────────────────────────────────────────
 
-    private (RepoSyncService service, TrackingIndexingService indexing, TrackingRegistry registry)
-        BuildService(string tempDir, Dictionary<string[], (string output, int exit)>? gitResponses = null)
+    private async Task<(RepoSyncService service, TrackingIndexingService indexing, TrackingRegistry registry)>
+        BuildServiceAsync(string tempDir, Dictionary<string[], (string output, int exit)>? gitResponses = null)
     {
         var hgvOptions = new HgvMateOptions { DataPath = tempDir };
         var syncOptions = new RepoSyncOptions { ClonePath = "repos" };
@@ -39,7 +39,7 @@ public sealed class RepoSyncServiceTests
 
         var id = System.Threading.Interlocked.Increment(ref _counter);
         var vectorStore = new VectorStore(Path.Combine(tempDir, $"vectors{id}.bin"), NullLogger<VectorStore>.Instance);
-        vectorStore.LoadAsync().GetAwaiter().GetResult();
+        await vectorStore.LoadAsync();
 
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null, NullLogger<OnnxEmbedder>.Instance);
         var reader = new SourceCodeReader(hgvOptions, syncOptions, NullLogger<SourceCodeReader>.Instance);
@@ -67,7 +67,7 @@ public sealed class RepoSyncServiceTests
             { ["diff", "--name-only", "abc123..def456"], ("src/Foo.cs\nsrc/Bar.ts\n", 0) }
         };
 
-        var (svc, _, _) = BuildService(_tempDir, responses);
+        var (svc, _, _) = await BuildServiceAsync(_tempDir, responses);
         var clonePath = Path.Combine(_tempDir, "repos", "myrepo");
         Directory.CreateDirectory(clonePath);
 
@@ -86,7 +86,7 @@ public sealed class RepoSyncServiceTests
             { ["diff", "--name-only", "abc123..def456"], ("", 128) }
         };
 
-        var (svc, _, _) = BuildService(_tempDir, responses);
+        var (svc, _, _) = await BuildServiceAsync(_tempDir, responses);
         var clonePath = Path.Combine(_tempDir, "repos", "myrepo");
         Directory.CreateDirectory(clonePath);
 
@@ -103,7 +103,7 @@ public sealed class RepoSyncServiceTests
             { ["diff", "--name-only", "abc123..abc123"], ("", 0) }
         };
 
-        var (svc, _, _) = BuildService(_tempDir, responses);
+        var (svc, _, _) = await BuildServiceAsync(_tempDir, responses);
         var clonePath = Path.Combine(_tempDir, "repos", "myrepo");
         Directory.CreateDirectory(clonePath);
 
@@ -131,7 +131,7 @@ public sealed class RepoSyncServiceTests
             { ["rev-parse", "HEAD"], (sha + "\n", 0) }
         };
 
-        var (svc, indexing, _) = BuildService(_tempDir, responses);
+        var (svc, indexing, _) = await BuildServiceAsync(_tempDir, responses);
 
         await svc.SyncRepoAsync(repo);
 
@@ -159,7 +159,7 @@ public sealed class RepoSyncServiceTests
             { ["diff", "--name-only", $"{oldSha}..{newSha}"], ("src/Changed.cs\n", 0) }
         };
 
-        var (svc, indexing, _) = BuildService(_tempDir, responses);
+        var (svc, indexing, _) = await BuildServiceAsync(_tempDir, responses);
 
         await svc.SyncRepoAsync(repo);
 
@@ -186,7 +186,7 @@ public sealed class RepoSyncServiceTests
             { ["diff", "--name-only", $"{oldSha}..{newSha}"], ("", 128) } // git diff fails
         };
 
-        var (svc, indexing, _) = BuildService(_tempDir, responses);
+        var (svc, indexing, _) = await BuildServiceAsync(_tempDir, responses);
 
         await svc.SyncRepoAsync(repo);
 
@@ -215,7 +215,7 @@ public sealed class RepoSyncServiceTests
             { ["rev-parse", "HEAD"], (sha + "\n", 0) }
         };
 
-        var (svc, indexing, registry) = BuildService(_tempDir, responses);
+        var (svc, indexing, registry) = await BuildServiceAsync(_tempDir, responses);
 
         await svc.SyncRepoAsync(repo);
 
@@ -244,7 +244,7 @@ public sealed class RepoSyncServiceTests
             { ["rev-parse", "HEAD"], ("", 128) }
         };
 
-        var (svc, _, _) = BuildService(_tempDir, responses);
+        var (svc, _, _) = await BuildServiceAsync(_tempDir, responses);
 
         // Should not throw — errors are caught and logged
         await svc.SyncRepoAsync(repo);
@@ -270,7 +270,7 @@ public sealed class RepoSyncServiceTests
             { ["diff", "--name-only", $"{oldSha}..{newSha}"], ("src/Changed.cs\n", 0) }
         };
 
-        var (svc, indexing, registry) = BuildService(_tempDir, responses);
+        var (svc, indexing, registry) = await BuildServiceAsync(_tempDir, responses);
 
         await svc.SyncRepoAsync(repo);
 
@@ -299,7 +299,7 @@ public sealed class RepoSyncServiceTests
             { ["rev-parse", "HEAD"], ("\n", 0) }
         };
 
-        var (svc, indexing, registry) = BuildService(_tempDir, responses);
+        var (svc, indexing, registry) = await BuildServiceAsync(_tempDir, responses);
 
         await svc.SyncRepoAsync(repo);
 
@@ -312,29 +312,27 @@ public sealed class RepoSyncServiceTests
     // ─── Disk space check ──────────────────────────────────────────────────
 
     [TestMethod]
-    public void EnsureSufficientDiskSpace_DoesNotThrow_WhenDisabled()
+    public async Task EnsureSufficientDiskSpace_DoesNotThrow_WhenDisabled()
     {
-        var hgvOptions = new HgvMateOptions { DataPath = _tempDir };
-        var syncOptions = new RepoSyncOptions { ClonePath = "repos", MinFreeDiskSpaceMb = 0 };
-        var (svc, _, _) = BuildService(_tempDir);
+        var (svc, _, _) = await BuildServiceAsync(_tempDir);
 
         // Should not throw — check is disabled
         svc.EnsureSufficientDiskSpace(_tempDir);
     }
 
     [TestMethod]
-    public void EnsureSufficientDiskSpace_Throws_WhenInsufficientSpace()
+    public async Task EnsureSufficientDiskSpace_Throws_WhenInsufficientSpace()
     {
-        var (svc, _, _) = BuildServiceWithMinDiskSpace(_tempDir, long.MaxValue / (1024 * 1024));
+        var (svc, _, _) = await BuildServiceWithMinDiskSpaceAsync(_tempDir, long.MaxValue / (1024 * 1024));
 
         Assert.ThrowsExactly<InvalidOperationException>(() =>
             svc.EnsureSufficientDiskSpace(_tempDir));
     }
 
     [TestMethod]
-    public void EnsureSufficientDiskSpace_DoesNotThrow_WhenSufficientSpace()
+    public async Task EnsureSufficientDiskSpace_DoesNotThrow_WhenSufficientSpace()
     {
-        var (svc, _, _) = BuildServiceWithMinDiskSpace(_tempDir, 1);
+        var (svc, _, _) = await BuildServiceWithMinDiskSpaceAsync(_tempDir, 1);
 
         // Should not throw — 1 MB is likely available
         svc.EnsureSufficientDiskSpace(_tempDir);
@@ -354,8 +352,8 @@ public sealed class RepoSyncServiceTests
         Assert.IsFalse(RepoSyncService.IsTransientError(new TaskCanceledException()));
     }
 
-    private (RepoSyncService service, TrackingIndexingService indexing, TrackingRegistry registry)
-        BuildServiceWithMinDiskSpace(string tempDir, long minMb)
+    private async Task<(RepoSyncService service, TrackingIndexingService indexing, TrackingRegistry registry)>
+        BuildServiceWithMinDiskSpaceAsync(string tempDir, long minMb)
     {
         var hgvOptions = new HgvMateOptions { DataPath = tempDir };
         var syncOptions = new RepoSyncOptions { ClonePath = "repos", MinFreeDiskSpaceMb = minMb };
@@ -364,7 +362,7 @@ public sealed class RepoSyncServiceTests
 
         var id = System.Threading.Interlocked.Increment(ref _counter);
         var vectorStore = new VectorStore(Path.Combine(tempDir, $"vectors{id}.bin"), NullLogger<VectorStore>.Instance);
-        vectorStore.LoadAsync().GetAwaiter().GetResult();
+        await vectorStore.LoadAsync();
 
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null, NullLogger<OnnxEmbedder>.Instance);
         var reader = new SourceCodeReader(hgvOptions, syncOptions, NullLogger<SourceCodeReader>.Instance);
