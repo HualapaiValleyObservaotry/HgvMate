@@ -4,6 +4,8 @@ services:
     container_name: hgvmate-mcp
     environment:
       - HGVMATE_TRANSPORT=sse
+      - RepoSync__ClonePath=/tmp/hgvmate/repos
+      - RepoSync__MinFreeDiskSpaceMb=1024
       # - GITHUB_TOKEN=your-github-pat
       # - AZURE_DEVOPS_PAT=your-azure-devops-pat
     ports:

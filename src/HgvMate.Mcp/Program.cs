@@ -145,7 +145,7 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
     configuration.GetSection(CredentialOptions.SectionName).Bind(credentialOptions);
 
     Directory.CreateDirectory(dataPath);
-    Directory.CreateDirectory(Path.Combine(dataPath, repoSyncOptions.ClonePath));
+    Directory.CreateDirectory(repoSyncOptions.ResolveCloneRoot(dataPath));
 
     var keysDir = new DirectoryInfo(Path.Combine(dataPath, "DataProtection-Keys"));
     services.AddDataProtection()

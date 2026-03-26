@@ -47,7 +47,7 @@ public class RepoSyncService : BackgroundService
     }
 
     public string GetClonePath(string repoName)
-        => Path.Combine(_hgvMateOptions.DataPath, _syncOptions.ClonePath, repoName);
+        => Path.Combine(_syncOptions.ResolveCloneRoot(_hgvMateOptions.DataPath), repoName);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

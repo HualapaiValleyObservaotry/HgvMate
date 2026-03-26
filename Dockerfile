@@ -35,6 +35,8 @@ RUN mkdir -p /app/models && \
 
 VOLUME /data
 ENV HgvMate__DataPath=/data
+ENV RepoSync__ClonePath=/tmp/hgvmate/repos
+ENV RepoSync__MinFreeDiskSpaceMb=1024
 ENV ASPNETCORE_URLS=http://+:5000
 ENTRYPOINT ["/app/HgvMate.Mcp"]
 
