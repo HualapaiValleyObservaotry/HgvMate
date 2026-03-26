@@ -171,6 +171,11 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
             options.ServiceName = serviceName;
             options.ServiceVersion = serviceVersion;
             options.Endpoint = otlpEndpoint;
+            // Auto-detect transport from endpoint: port 4318 = HTTP/protobuf, otherwise gRPC
+            if (Uri.TryCreate(otlpEndpoint, UriKind.Absolute, out var uri) && uri.Port == 4318)
+            {
+                options.Transport = HVO.Enterprise.Telemetry.OpenTelemetry.OtlpTransport.HttpProtobuf;
+            }
             options.EnableTraceExport = true;
             options.EnableMetricsExport = true;
             options.EnableLogExport = true;
