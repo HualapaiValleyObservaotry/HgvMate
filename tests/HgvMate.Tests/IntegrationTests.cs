@@ -1,9 +1,7 @@
 using HgvMate.Mcp.Configuration;
-using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
 using HgvMate.Mcp.Tools;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HgvMate.Tests;
@@ -16,24 +14,17 @@ namespace HgvMate.Tests;
 public sealed class IntegrationTests
 {
     private string _tempDir = null!;
-    private SqliteConnection _conn = null!;
-    private static int _counter;
 
     [TestInitialize]
-    public async Task Setup()
+    public void Setup()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), "HgvMateInteg_" + Path.GetRandomFileName());
         Directory.CreateDirectory(_tempDir);
-
-        var id = System.Threading.Interlocked.Increment(ref _counter);
-        _conn = new SqliteConnection($"Data Source=integtest{id};Mode=Memory;Cache=Shared");
-        await _conn.OpenAsync();
     }
 
     [TestCleanup]
     public void Cleanup()
     {
-        _conn.Dispose();
         if (Directory.Exists(_tempDir))
             Directory.Delete(_tempDir, recursive: true);
     }
@@ -69,10 +60,7 @@ public sealed class IntegrationTests
         var searchOptions = new SearchOptions { MaxResults = 10 };
         var credOptions = new CredentialOptions();
 
-        var factory = new SharedConnFactory(_conn.ConnectionString);
-        await new DatabaseInitializer(factory, NullLogger<DatabaseInitializer>.Instance).InitializeAsync();
-
-        var registry = new SqliteRepoRegistry(factory, NullLogger<SqliteRepoRegistry>.Instance);
+        var registry = new JsonRepoRegistry(_tempDir, NullLogger<JsonRepoRegistry>.Instance);
         var credProvider = new GitCredentialProvider(credOptions, NullLogger<GitCredentialProvider>.Instance);
 
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null, NullLogger<OnnxEmbedder>.Instance);
@@ -136,9 +124,7 @@ public sealed class IntegrationTests
         var searchOptions = new SearchOptions { MaxResults = 10 };
         var credOptions = new CredentialOptions();
 
-        var factory = new SharedConnFactory(_conn.ConnectionString);
-        await new DatabaseInitializer(factory, NullLogger<DatabaseInitializer>.Instance).InitializeAsync();
-        var registry = new SqliteRepoRegistry(factory, NullLogger<SqliteRepoRegistry>.Instance);
+        var registry = new JsonRepoRegistry(_tempDir, NullLogger<JsonRepoRegistry>.Instance);
         var credProvider = new GitCredentialProvider(credOptions, NullLogger<GitCredentialProvider>.Instance);
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null, NullLogger<OnnxEmbedder>.Instance);
         var reader = new SourceCodeReader(hgvOptions, syncOptions, NullLogger<SourceCodeReader>.Instance);
@@ -220,13 +206,6 @@ public sealed class IntegrationTests
             throw new InvalidOperationException(
                 $"git {args} failed with exit code {p.ExitCode}. WorkingDirectory='{workingDir}'. Stderr: {stderr}");
         }
-    }
-
-    private sealed class SharedConnFactory : ISqliteConnectionFactory
-    {
-        private readonly string _connStr;
-        public SharedConnFactory(string connStr) => _connStr = connStr;
-        public SqliteConnection CreateConnection() => new SqliteConnection(_connStr);
     }
 
     private sealed class TrackingIndexingService : IndexingService

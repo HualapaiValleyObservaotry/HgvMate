@@ -144,7 +144,7 @@ public sealed class AdminToolsTests
 
         public Task<RepoRecord?> GetByUrlAsync(string url)
             => Task.FromResult(_repos.FirstOrDefault(r =>
-                SqliteRepoRegistry.NormalizeUrl(r.Url) == SqliteRepoRegistry.NormalizeUrl(url)));
+                JsonRepoRegistry.NormalizeUrl(r.Url) == JsonRepoRegistry.NormalizeUrl(url)));
 
         public Task<bool> UpdateLastShaAsync(string name, string sha)
         {

@@ -1,15 +1,12 @@
 ﻿using HgvMate.Mcp;
 using HgvMate.Mcp.Api;
 using HgvMate.Mcp.Configuration;
-using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
 using HgvMate.Mcp.Tools;
 using HVO.Enterprise.Telemetry;
 using HVO.Enterprise.Telemetry.Abstractions;
 using HVO.Enterprise.Telemetry.Correlation;
-using HVO.Enterprise.Telemetry.Data.AdoNet;
-using HVO.Enterprise.Telemetry.Data.AdoNet.Extensions;
 using HVO.Enterprise.Telemetry.HealthChecks;
 using HVO.Enterprise.Telemetry.Logging;
 using HVO.Enterprise.Telemetry.OpenTelemetry;
@@ -78,19 +75,14 @@ if (useSse)
             logger.LogError(ex, "Unhandled exception on {Method} {Path} [traceId={TraceId}]",
                 context.Request.Method, context.Request.Path, traceId);
 
-            bool isBusy = ex is Microsoft.Data.Sqlite.SqliteException sqlex &&
-                          (sqlex.SqliteErrorCode == 5 || sqlex.SqliteErrorCode == 6); // SQLITE_BUSY / SQLITE_LOCKED
-
             context.Response.ContentType = "application/json";
-            context.Response.StatusCode = isBusy ? 503 : 500;
-            if (isBusy)
-                context.Response.Headers["Retry-After"] = "5";
+            context.Response.StatusCode = 500;
 
             var isDev = app.Environment.IsDevelopment();
             await context.Response.WriteAsJsonAsync(new
             {
-                error = isBusy ? "Service temporarily unavailable." : "An unexpected error occurred.",
-                detail = isBusy || isDev ? ex?.Message : null,
+                error = "An unexpected error occurred.",
+                detail = isDev ? ex?.Message : null,
                 traceId
             });
         });
@@ -151,9 +143,6 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
     services.AddDataProtection()
         .PersistKeysToFileSystem(keysDir);
 
-    var dbPath = Path.Combine(dataPath, "hgvmate.db");
-    var connectionString = $"Data Source={dbPath};Default Timeout=30";
-
     services.AddSingleton(hgvMateOptions);
     services.AddSingleton(repoSyncOptions);
     services.AddSingleton(searchOptions);
@@ -167,13 +156,6 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
         options.IncludeCorrelationId = true;
         options.IncludeTraceId = true;
         options.IncludeSpanId = true;
-    });
-
-    services.AddAdoNetTelemetry(options =>
-    {
-        options.RecordStatements = true;
-        options.RecordParameters = false; // never log parameter values (PII safety)
-        options.RecordConnectionInfo = false;
     });
 
     var telemetrySection = configuration.GetSection("Telemetry");
@@ -204,15 +186,13 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
     });
 
     // ── Data + Services ─────────────────────────────────────────────────
-    services.AddSingleton<ISqliteConnectionFactory>(sp =>
-        new SqliteConnectionFactory(connectionString, sp.GetRequiredService<ILogger<SqliteConnectionFactory>>()));
-    services.AddSingleton<DatabaseInitializer>();
     services.AddSingleton<IGitCredentialProvider, GitCredentialProvider>();
 
     services.AddSingleton<StartupState>();
     services.AddHostedService<WarmupService>();
 
-    services.AddSingleton<IRepoRegistry, SqliteRepoRegistry>();
+    services.AddSingleton<IRepoRegistry>(sp =>
+        new JsonRepoRegistry(dataPath, sp.GetRequiredService<ILogger<JsonRepoRegistry>>()));
     services.AddSingleton<RepoSyncService>();
     services.AddHostedService<RepoSyncService>(sp => sp.GetRequiredService<RepoSyncService>());
 

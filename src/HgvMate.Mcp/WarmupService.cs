@@ -1,5 +1,4 @@
 using HgvMate.Mcp.Configuration;
-using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Search;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -8,29 +7,23 @@ namespace HgvMate.Mcp;
 
 /// <summary>
 /// Initializes data stores in the background so Kestrel starts accepting requests immediately.
-/// Completes DB schema, vector cache, and ONNX model warmup, updating <see cref="StartupState"/>
+/// Loads the vector cache and warms up the ONNX model, updating <see cref="StartupState"/>
 /// so the health endpoint can report readiness.
 /// </summary>
 public sealed class WarmupService : BackgroundService
 {
-    private readonly DatabaseInitializer _dbInit;
     private readonly VectorStore _vectorStore;
-    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly IOnnxEmbedder _embedder;
     private readonly StartupState _startupState;
     private readonly ILogger<WarmupService> _logger;
 
     public WarmupService(
-        DatabaseInitializer dbInit,
         VectorStore vectorStore,
-        ISqliteConnectionFactory connectionFactory,
         IOnnxEmbedder embedder,
         StartupState startupState,
         ILogger<WarmupService> logger)
     {
-        _dbInit = dbInit;
         _vectorStore = vectorStore;
-        _connectionFactory = connectionFactory;
         _embedder = embedder;
         _startupState = startupState;
         _logger = logger;
@@ -43,13 +36,11 @@ public sealed class WarmupService : BackgroundService
 
         try
         {
-            _logger.LogInformation("Warmup: initializing database schema...");
-            await _dbInit.InitializeAsync();
+            // No database initialization needed — repo metadata is stored as JSON files
             _startupState.MarkDatabaseReady();
-            _logger.LogInformation("Warmup: database ready.");
 
             _logger.LogInformation("Warmup: loading vector cache...");
-            await LoadOrMigrateVectorsAsync();
+            await _vectorStore.LoadAsync();
             _startupState.MarkVectorCacheReady();
             _logger.LogInformation("Warmup: vector cache ready ({Chunks} chunks).", _vectorStore.CachedChunkCount);
 
@@ -65,22 +56,4 @@ public sealed class WarmupService : BackgroundService
         }
     }
 
-    private async Task LoadOrMigrateVectorsAsync()
-    {
-        // Try loading from binary file first (fast path)
-        await _vectorStore.LoadAsync();
-
-        if (_vectorStore.CachedChunkCount > 0)
-            return;
-
-        // Binary file was empty or missing — check if SQLite has legacy data to migrate
-        _logger.LogInformation("Warmup: no binary vector data found. Checking SQLite for legacy data...");
-        await _vectorStore.MigrateFromSqliteAsync(_connectionFactory);
-
-        if (_vectorStore.CachedChunkCount > 0)
-        {
-            _logger.LogInformation("Warmup: saving migrated data to binary format...");
-            await _vectorStore.SaveAsync();
-        }
-    }
 }
