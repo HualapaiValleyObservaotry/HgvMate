@@ -77,8 +77,8 @@ public sealed class IntegrationTests
 
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null, NullLogger<OnnxEmbedder>.Instance);
         var reader = new SourceCodeReader(hgvOptions, syncOptions, NullLogger<SourceCodeReader>.Instance);
-        var vectorStore = new VectorStore(factory, NullLogger<VectorStore>.Instance);
-        await vectorStore.EnsureSchemaAsync();
+        var vectorStore = new VectorStore(Path.Combine(_tempDir, "vectors.bin"), NullLogger<VectorStore>.Instance);
+        await vectorStore.LoadAsync();
 
         var indexingService = new IndexingService(vectorStore, embedder, reader, searchOptions, NullLogger<IndexingService>.Instance);
         var gitNexus = new GitNexusService(hgvOptions, syncOptions, NullLogger<GitNexusService>.Instance);
@@ -142,8 +142,8 @@ public sealed class IntegrationTests
         var credProvider = new GitCredentialProvider(credOptions, NullLogger<GitCredentialProvider>.Instance);
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null, NullLogger<OnnxEmbedder>.Instance);
         var reader = new SourceCodeReader(hgvOptions, syncOptions, NullLogger<SourceCodeReader>.Instance);
-        var vectorStore = new VectorStore(factory, NullLogger<VectorStore>.Instance);
-        await vectorStore.EnsureSchemaAsync();
+        var vectorStore = new VectorStore(Path.Combine(_tempDir, "vectors2.bin"), NullLogger<VectorStore>.Instance);
+        await vectorStore.LoadAsync();
         var indexingService = new TrackingIndexingService(vectorStore, embedder, reader, searchOptions);
         var gitNexus = new GitNexusService(hgvOptions, syncOptions, NullLogger<GitNexusService>.Instance);
         var syncService = new RepoSyncService(registry, credProvider, hgvOptions, syncOptions, indexingService, gitNexus, new HgvMate.Mcp.Configuration.StartupState(), NullLogger<RepoSyncService>.Instance);

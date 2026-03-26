@@ -1,7 +1,5 @@
 using HgvMate.Mcp.Configuration;
-using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Search;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HgvMate.Tests;
@@ -10,7 +8,6 @@ namespace HgvMate.Tests;
 public sealed class IndexingServiceTests
 {
     private string _tempDir = null!;
-    private static int _counter;
 
     [TestInitialize]
     public void Setup()
@@ -40,25 +37,14 @@ public sealed class IndexingServiceTests
         var reader = new SourceCodeReader(hgvOptions, syncOptions, NullLogger<SourceCodeReader>.Instance);
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null, NullLogger<OnnxEmbedder>.Instance);
 
-        var id = System.Threading.Interlocked.Increment(ref _counter);
-        using var conn = new SqliteConnection($"Data Source=idxtest{id};Mode=Memory;Cache=Shared");
-        await conn.OpenAsync();
-        var factory = new TestConnectionFactory(conn.ConnectionString);
-        var vectorStore = new VectorStore(factory, NullLogger<VectorStore>.Instance);
-        await vectorStore.EnsureSchemaAsync();
+        var vectorStore = new VectorStore(Path.Combine(_tempDir, "vectors.bin"), NullLogger<VectorStore>.Instance);
+        await vectorStore.LoadAsync();
 
         var service = new IndexingService(vectorStore, embedder, reader, searchOptions, NullLogger<IndexingService>.Instance);
         await service.IndexRepoAsync("testrepo");
 
-        var results = await vectorStore.SearchAsync(new float[384], "testrepo", 10);
+        var results = vectorStore.Search(new float[384], "testrepo", 10);
         Assert.IsEmpty(results);
-    }
-
-    private sealed class TestConnectionFactory : ISqliteConnectionFactory
-    {
-        private readonly string _connStr;
-        public TestConnectionFactory(string connStr) => _connStr = connStr;
-        public SqliteConnection CreateConnection() => new SqliteConnection(_connStr);
     }
 
     // ─── IsIndexableFile regression tests ────────────────────────────────────

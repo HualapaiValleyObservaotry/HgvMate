@@ -170,6 +170,7 @@ public class RepoSyncService : BackgroundService
                         if (cancellationToken.IsCancellationRequested) break;
                         await _indexingService.IndexFileAsync(repo.Name, file, cancellationToken);
                     }
+                    await _indexingService.SaveVectorStoreAsync();
                     await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
                 }
                 else

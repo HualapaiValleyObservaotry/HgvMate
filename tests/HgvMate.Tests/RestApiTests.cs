@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Scalar.AspNetCore;
 
@@ -308,7 +309,9 @@ public sealed class RestApiTests : IDisposable
         builder.Services.AddSingleton<GitNexusService>();
         builder.Services.AddSingleton<IOnnxEmbedder>(
             new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null, NullLogger<OnnxEmbedder>.Instance));
-        builder.Services.AddSingleton<VectorStore>();
+        builder.Services.AddSingleton(sp =>
+            new VectorStore(Path.Combine(_tempDir, "vectors.bin"),
+                sp.GetRequiredService<ILoggerFactory>().CreateLogger<VectorStore>()));
         builder.Services.AddSingleton<IndexingService>();
         builder.Services.AddSingleton<HybridSearchService>();
 
@@ -331,7 +334,7 @@ public sealed class RestApiTests : IDisposable
         var dbInit = app.Services.GetRequiredService<DatabaseInitializer>();
         await dbInit.InitializeAsync();
         var vectorStore = app.Services.GetRequiredService<VectorStore>();
-        await vectorStore.EnsureSchemaAsync();
+        await vectorStore.LoadAsync();
 
         startupState.MarkDatabaseReady();
         if (markReady)

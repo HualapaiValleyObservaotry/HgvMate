@@ -35,7 +35,9 @@ RUN mkdir -p /app/models && \
 
 VOLUME /data
 ENV HgvMate__DataPath=/data
+# Clone repos to ephemeral local storage (fast SSD, not Azure Files SMB)
 ENV RepoSync__ClonePath=/tmp/hgvmate/repos
+# Reserve 1 GB free space on ephemeral disk to prevent filling it
 ENV RepoSync__MinFreeDiskSpaceMb=1024
 ENV ASPNETCORE_URLS=http://+:5000
 ENTRYPOINT ["/app/HgvMate.Mcp"]

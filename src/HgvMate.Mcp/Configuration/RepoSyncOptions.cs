@@ -4,6 +4,11 @@ public class RepoSyncOptions
 {
     public const string SectionName = "RepoSync";
     public int PollIntervalMinutes { get; set; } = 15;
+    /// <summary>
+    /// Path where repositories are cloned.
+    /// If absolute (starts with /), used as-is (ephemeral local storage).
+    /// If relative, resolved under HgvMateOptions.DataPath (persistent storage).
+    /// </summary>
     public string ClonePath { get; set; } = "repos";
 
     /// <summary>
