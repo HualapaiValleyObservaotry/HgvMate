@@ -20,6 +20,7 @@ public class StructuralTools
         [Description("Symbol name to find (class, method, or function name)")] string name,
         [Description("Limit to specific repository (optional)")] string? repository = null)
     {
+        HgvMateDiagnostics.RecordToolCall("find_symbol");
         if (string.IsNullOrWhiteSpace(name))
             return "Error: name is required.";
 
@@ -39,6 +40,7 @@ public class StructuralTools
         [Description("Symbol name to find references for")] string name,
         [Description("Limit to specific repository (optional)")] string? repository = null)
     {
+        HgvMateDiagnostics.RecordToolCall("get_references");
         if (string.IsNullOrWhiteSpace(name))
             return "Error: name is required.";
 
@@ -58,6 +60,7 @@ public class StructuralTools
         [Description("Symbol name to trace the call chain for")] string name,
         [Description("Limit to specific repository (optional)")] string? repository = null)
     {
+        HgvMateDiagnostics.RecordToolCall("get_call_chain");
         if (string.IsNullOrWhiteSpace(name))
             return "Error: name is required.";
 
@@ -77,6 +80,7 @@ public class StructuralTools
         [Description("Symbol name to analyze impact for")] string name,
         [Description("Limit to specific repository (optional)")] string? repository = null)
     {
+        HgvMateDiagnostics.RecordToolCall("get_impact");
         if (string.IsNullOrWhiteSpace(name))
             return "Error: name is required.";
 

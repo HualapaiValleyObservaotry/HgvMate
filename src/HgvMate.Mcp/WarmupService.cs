@@ -42,6 +42,7 @@ public sealed class WarmupService : BackgroundService
             _logger.LogInformation("Warmup: loading vector cache...");
             await _vectorStore.LoadAsync();
             _startupState.MarkVectorCacheReady();
+            HgvMateDiagnostics.SetVectorChunkCount(_vectorStore.CachedChunkCount);
             _logger.LogInformation("Warmup: vector cache ready ({Chunks} chunks).", _vectorStore.CachedChunkCount);
 
             // ONNX model loads in constructor, just verify it's available

@@ -23,6 +23,7 @@ public class SourceCodeTools
         [Description("Search query — keywords, function names, or natural language description")] string query,
         [Description("Limit search to a specific repository name (optional)")] string? repository = null)
     {
+        HgvMateDiagnostics.RecordToolCall("search_source_code");
         if (string.IsNullOrWhiteSpace(query))
             return "Error: query is required.";
 
@@ -53,6 +54,7 @@ public class SourceCodeTools
         [Description("Name of the repository")] string repository,
         [Description("Relative path to the file within the repository (e.g., 'src/Program.cs')")] string path)
     {
+        HgvMateDiagnostics.RecordToolCall("get_file_content");
         if (string.IsNullOrWhiteSpace(repository))
             return "Error: repository is required.";
         if (string.IsNullOrWhiteSpace(path))

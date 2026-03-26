@@ -24,6 +24,7 @@ public class AdminTools
         [Description("Branch to clone (default: main)")] string branch = "main",
         [Description("Source type: 'github' or 'azuredevops' (default: github)")] string source = "github")
     {
+        HgvMateDiagnostics.RecordToolCall("add_repository");
         if (string.IsNullOrWhiteSpace(name))
             return "Error: name is required.";
         if (string.IsNullOrWhiteSpace(url))
@@ -59,6 +60,7 @@ public class AdminTools
     public async Task<string> RemoveRepository(
         [Description("Name of the repository to remove")] string name)
     {
+        HgvMateDiagnostics.RecordToolCall("remove_repository");
         if (string.IsNullOrWhiteSpace(name))
             return "Error: name is required.";
 
@@ -82,6 +84,7 @@ public class AdminTools
     [Description("List all registered repositories with their sync status.")]
     public async Task<string> ListRepositories()
     {
+        HgvMateDiagnostics.RecordToolCall("list_repositories");
         try
         {
             var repos = await _registry.GetAllAsync();
@@ -103,6 +106,7 @@ public class AdminTools
     public async Task<string> Reindex(
         [Description("Repository name to reindex, or omit for all repositories")] string? repository = null)
     {
+        HgvMateDiagnostics.RecordToolCall("reindex");
         try
         {
             if (!string.IsNullOrWhiteSpace(repository))
@@ -130,6 +134,7 @@ public class AdminTools
     public async Task<string> IndexStatus(
         [Description("Repository name to check, or omit for all repositories")] string? repository = null)
     {
+        HgvMateDiagnostics.RecordToolCall("index_status");
         try
         {
             IReadOnlyList<RepoRecord> repos;

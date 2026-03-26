@@ -94,8 +94,13 @@ public class RepoSyncService : BackgroundService
 
     public virtual async Task SyncAllAsync(CancellationToken cancellationToken = default)
     {
+        using var activity = HgvMateDiagnostics.ActivitySource.StartActivity("SyncAll");
         var repos = await _registry.GetAllAsync();
-        foreach (var repo in repos.Where(r => r.Enabled))
+        var enabledRepos = repos.Where(r => r.Enabled).ToList();
+        activity?.SetTag("hgvmate.repo.count", enabledRepos.Count);
+        HgvMateDiagnostics.SetActiveRepoCount(enabledRepos.Count);
+
+        foreach (var repo in enabledRepos)
         {
             if (cancellationToken.IsCancellationRequested) break;
             await SyncRepoAsync(repo, cancellationToken);
@@ -117,6 +122,10 @@ public class RepoSyncService : BackgroundService
 
     private async Task SyncRepoInternalAsync(RepoRecord repo, CancellationToken cancellationToken)
     {
+        using var activity = HgvMateDiagnostics.ActivitySource.StartActivity("SyncRepo");
+        activity?.SetTag("hgvmate.repo.name", repo.Name);
+        activity?.SetTag("hgvmate.repo.source", repo.Source);
+
         var clonePath = GetClonePath(repo.Name);
         _logger.LogInformation("Syncing repo '{Name}' to '{Path}'...", repo.Name, clonePath);
         await _registry.UpdateSyncStateAsync(repo.Name, SyncStates.Syncing);
@@ -126,6 +135,7 @@ public class RepoSyncService : BackgroundService
         {
             var oldSha = repo.LastSha;
             bool isFirstSync = !Directory.Exists(Path.Combine(clonePath, ".git"));
+            activity?.SetTag("hgvmate.repo.is_first_sync", isFirstSync);
 
             if (isFirstSync)
             {
@@ -189,16 +199,22 @@ public class RepoSyncService : BackgroundService
 
             await _registry.ClearSyncErrorAsync(repo.Name);
             _telemetry?.TrackEvent("hgvmate.repo.sync_completed");
+            HgvMateDiagnostics.RepoSyncTotal.Add(1, new KeyValuePair<string, object?>("repo", repo.Name), new KeyValuePair<string, object?>("status", "success"));
+            activity?.SetTag("hgvmate.repo.new_sha", newSha);
         }
         catch (Exception ex)
         {
             _telemetry?.TrackException(ex);
             _telemetry?.TrackEvent("hgvmate.repo.sync_failed");
+            HgvMateDiagnostics.RepoSyncErrors.Add(1, new KeyValuePair<string, object?>("repo", repo.Name));
+            HgvMateDiagnostics.RepoSyncTotal.Add(1, new KeyValuePair<string, object?>("repo", repo.Name), new KeyValuePair<string, object?>("status", "error"));
+            activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
             _logger.LogError(ex, "Failed to sync repo '{Name}'.", repo.Name);
             await _registry.UpdateSyncErrorAsync(repo.Name, ex.Message);
         }
         finally
         {
+            HgvMateDiagnostics.RepoSyncDuration.Record(sw.Elapsed.TotalMilliseconds, new KeyValuePair<string, object?>("repo", repo.Name));
             _telemetry?.RecordMetric("hgvmate.repo.sync_duration_ms", sw.Elapsed.TotalMilliseconds);
         }
     }

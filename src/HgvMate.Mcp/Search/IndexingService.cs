@@ -46,6 +46,8 @@ public class IndexingService
 
     public virtual async Task<IndexResult> IndexRepoAsync(string repoName, CancellationToken cancellationToken = default)
     {
+        using var activity = HgvMateDiagnostics.ActivitySource.StartActivity("IndexRepo");
+        activity?.SetTag("hgvmate.repo.name", repoName);
         var started = DateTime.UtcNow;
         if (!_embedder.IsAvailable)
         {
@@ -97,10 +99,19 @@ public class IndexingService
         }
 
         await _vectorStore.SaveAsync();
+        HgvMateDiagnostics.SetVectorChunkCount(_vectorStore.CachedChunkCount);
 
         var duration = DateTime.UtcNow - started;
         _logger.LogInformation("Indexed {Files} files ({Chunks} chunks, {Skipped} skipped) for repo '{Repo}' in {Duration}.",
             fileCount, chunkCount, skippedCount, repoName, duration);
+
+        HgvMateDiagnostics.IndexFilesTotal.Add(fileCount, new KeyValuePair<string, object?>("repo", repoName));
+        HgvMateDiagnostics.IndexChunksTotal.Add(chunkCount, new KeyValuePair<string, object?>("repo", repoName));
+        HgvMateDiagnostics.IndexDuration.Record(duration.TotalMilliseconds, new KeyValuePair<string, object?>("repo", repoName));
+        activity?.SetTag("hgvmate.index.files", fileCount);
+        activity?.SetTag("hgvmate.index.chunks", chunkCount);
+        activity?.SetTag("hgvmate.index.skipped", skippedCount);
+
         return new IndexResult(fileCount, chunkCount, skippedCount, skippedFiles.AsReadOnly(), duration);
     }
 

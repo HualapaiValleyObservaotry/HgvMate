@@ -21,9 +21,6 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Scalar.AspNetCore;
 
-// ── Enable OpenTelemetry SDK self-diagnostics for troubleshooting ────────────
-AppContext.SetSwitch("OpenTelemetry.Experimental.Sdk.SelfDiagnostics", true);
-
 // ── Determine transport before building the host ────────────────────────────
 var preConfig = new ConfigurationBuilder()
     .AddJsonFile("appsettings.json", optional: true)
@@ -133,6 +130,7 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
     var dataPath = Environment.GetEnvironmentVariable("HGVMATE_DATA_PATH") ?? hgvMateOptions.DataPath;
     hgvMateOptions.DataPath = dataPath;
     hgvMateOptions.Transport = transport;
+    HgvMateDiagnostics.SetDataPath(dataPath);
 
     var repoSyncOptions = new RepoSyncOptions();
     configuration.GetSection(RepoSyncOptions.SectionName).Bind(repoSyncOptions);
@@ -199,6 +197,8 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
                 b.AddMeter("Microsoft.AspNetCore.Hosting");
                 b.AddMeter("Microsoft.AspNetCore.Server.Kestrel");
                 b.AddMeter("System.Net.Http");
+                b.AddProcessInstrumentation();
+                b.AddRuntimeInstrumentation();
             })
             .WithLogging();
     }

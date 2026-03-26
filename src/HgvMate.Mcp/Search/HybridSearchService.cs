@@ -37,7 +37,12 @@ public class HybridSearchService
         string? repositoryName = null,
         CancellationToken cancellationToken = default)
     {
+        using var activity = HgvMateDiagnostics.ActivitySource.StartActivity("Search");
+        activity?.SetTag("hgvmate.search.query", query);
+        if (repositoryName != null) activity?.SetTag("hgvmate.repo.name", repositoryName);
+
         var sw = Stopwatch.StartNew();
+        HgvMateDiagnostics.SearchRequestsTotal.Add(1);
         _telemetry?.RecordMetric("hgvmate.search.requests", 1);
 
         var grepTask = _grepService.SearchAsync(query, repositoryName, cancellationToken);
@@ -65,6 +70,7 @@ public class HybridSearchService
         }
         finally
         {
+            HgvMateDiagnostics.SearchDuration.Record(sw.Elapsed.TotalMilliseconds);
             _telemetry?.RecordMetric("hgvmate.search.duration_ms", sw.Elapsed.TotalMilliseconds);
         }
     }
