@@ -145,7 +145,13 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
     configuration.GetSection(CredentialOptions.SectionName).Bind(credentialOptions);
 
     Directory.CreateDirectory(dataPath);
-    Directory.CreateDirectory(Path.Combine(dataPath, repoSyncOptions.ClonePath));
+
+    // Resolve clone path: absolute paths use ephemeral local storage,
+    // relative paths resolve under dataPath (persistent storage)
+    var cloneRoot = Path.IsPathRooted(repoSyncOptions.ClonePath)
+        ? repoSyncOptions.ClonePath
+        : Path.Combine(dataPath, repoSyncOptions.ClonePath);
+    Directory.CreateDirectory(cloneRoot);
 
     var keysDir = new DirectoryInfo(Path.Combine(dataPath, "DataProtection-Keys"));
     services.AddDataProtection()
@@ -179,7 +185,9 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
     var telemetrySection = configuration.GetSection("Telemetry");
     var serviceName = telemetrySection["ServiceName"] ?? "HgvMate";
     var serviceVersion = telemetrySection["ServiceVersion"] ?? "1.0.0";
-    var otlpEndpoint = telemetrySection["OtlpEndpoint"] ?? configuration["Telemetry:OtlpEndpoint"];
+    // Support Aspire / Azure Container Apps: OTEL_EXPORTER_OTLP_ENDPOINT is injected automatically
+    var otlpEndpoint = telemetrySection["OtlpEndpoint"]
+        ?? Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
     if (!string.IsNullOrEmpty(otlpEndpoint))
     {
         services.AddOpenTelemetryExport(options =>
@@ -218,7 +226,10 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
     services.AddSingleton<GitGrepSearchService>();
     services.AddSingleton<GitNexusService>();
     services.AddSingleton<IOnnxEmbedder, OnnxEmbedder>();
-    services.AddSingleton<VectorStore>();
+    services.AddSingleton(sp =>
+        new VectorStore(
+            Path.Combine(dataPath, "vectors.bin"),
+            sp.GetRequiredService<ILogger<VectorStore>>()));
     services.AddSingleton<IndexingService>();
     services.AddSingleton<HybridSearchService>();
 }

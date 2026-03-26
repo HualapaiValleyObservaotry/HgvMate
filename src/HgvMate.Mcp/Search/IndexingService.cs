@@ -41,6 +41,9 @@ public class IndexingService
         _logger = logger;
     }
 
+    /// <summary>Persists pending vector store changes to disk.</summary>
+    public Task SaveVectorStoreAsync() => _vectorStore.SaveAsync();
+
     public virtual async Task<IndexResult> IndexRepoAsync(string repoName, CancellationToken cancellationToken = default)
     {
         var started = DateTime.UtcNow;
@@ -59,7 +62,7 @@ public class IndexingService
             return new IndexResult(0, 0, 0, [], TimeSpan.Zero);
         }
 
-        await _vectorStore.DeleteChunksForRepoAsync(repoName);
+        _vectorStore.DeleteChunksForRepo(repoName);
 
         var files = GetIndexableFiles(repoRoot);
         int fileCount = 0, chunkCount = 0, skippedCount = 0;
@@ -82,7 +85,7 @@ public class IndexingService
                     chunkCount++;
                 }
 
-                await _vectorStore.UpsertChunksAsync(sourceChunks);
+                _vectorStore.UpsertChunks(sourceChunks);
                 fileCount++;
             }
             catch (Exception ex)
@@ -92,6 +95,8 @@ public class IndexingService
                 skippedFiles.Add(Path.GetRelativePath(repoRoot, filePath));
             }
         }
+
+        await _vectorStore.SaveAsync();
 
         var duration = DateTime.UtcNow - started;
         _logger.LogInformation("Indexed {Files} files ({Chunks} chunks, {Skipped} skipped) for repo '{Repo}' in {Duration}.",
@@ -104,7 +109,7 @@ public class IndexingService
         if (!_embedder.IsAvailable) return;
 
         // Always delete old chunks first — handles deleted files and renames
-        await _vectorStore.DeleteChunksForFileAsync(repoName, relativePath);
+        _vectorStore.DeleteChunksForFile(repoName, relativePath);
 
         var repoRoot = _reader.GetRepoRoot(repoName);
         var fullPath = Path.Combine(repoRoot, relativePath);
@@ -125,7 +130,8 @@ public class IndexingService
             sourceChunks.Add(new SourceChunk(repoName, relativePath, i, chunks[i], embedding));
         }
 
-        await _vectorStore.UpsertChunksAsync(sourceChunks);
+        _vectorStore.UpsertChunks(sourceChunks);
+        // SaveAsync is deferred — callers (e.g. RepoSyncService) save once after processing all changed files.
     }
 
     private IReadOnlyList<string> ChunkText(string text)

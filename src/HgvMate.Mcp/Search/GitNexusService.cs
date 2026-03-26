@@ -23,7 +23,12 @@ public class GitNexusService
     }
 
     private string GetRepoPath(string repoName)
-        => Path.Combine(_hgvMateOptions.DataPath, _syncOptions.ClonePath, repoName);
+    {
+        var root = Path.IsPathRooted(_syncOptions.ClonePath)
+            ? _syncOptions.ClonePath
+            : Path.Combine(_hgvMateOptions.DataPath, _syncOptions.ClonePath);
+        return Path.Combine(root, repoName);
+    }
 
     public async Task AnalyzeAsync(string repoName, CancellationToken cancellationToken = default)
     {
@@ -133,7 +138,9 @@ public class GitNexusService
 
     private async Task<string[]> GetAvailableReposAsync()
     {
-        var reposPath = Path.Combine(_hgvMateOptions.DataPath, _syncOptions.ClonePath);
+        var reposPath = Path.IsPathRooted(_syncOptions.ClonePath)
+            ? _syncOptions.ClonePath
+            : Path.Combine(_hgvMateOptions.DataPath, _syncOptions.ClonePath);
         if (!Directory.Exists(reposPath))
             return [];
         return Directory.GetDirectories(reposPath)

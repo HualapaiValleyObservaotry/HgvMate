@@ -139,7 +139,9 @@ public sealed class SseTransportTests : IDisposable
         builder.Services.AddSingleton<GitNexusService>();
         builder.Services.AddSingleton<IOnnxEmbedder>(
             new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null, NullLogger<OnnxEmbedder>.Instance));
-        builder.Services.AddSingleton<VectorStore>();
+        builder.Services.AddSingleton(sp =>
+            new VectorStore(Path.Combine(_tempDir, "vectors.bin"),
+                sp.GetRequiredService<ILoggerFactory>().CreateLogger<VectorStore>()));
         builder.Services.AddSingleton<IndexingService>();
         builder.Services.AddSingleton<HybridSearchService>();
 
@@ -155,7 +157,7 @@ public sealed class SseTransportTests : IDisposable
         await dbInit.InitializeAsync();
 
         var vectorStore = app.Services.GetRequiredService<VectorStore>();
-        await vectorStore.EnsureSchemaAsync();
+        await vectorStore.LoadAsync();
 
         startupState.MarkDatabaseReady();
         startupState.MarkVectorCacheReady();

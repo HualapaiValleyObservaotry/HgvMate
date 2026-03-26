@@ -198,9 +198,9 @@ public sealed class AdminToolsTests
             var embedder = new HgvMate.Mcp.Search.OnnxEmbedder(
                 (Microsoft.ML.OnnxRuntime.InferenceSession?)null,
                 NullLogger<HgvMate.Mcp.Search.OnnxEmbedder>.Instance);
-            // Use a null-returning factory so VectorStore never hits disk
-            var factory = new NullConnectionFactory();
-            var store = new HgvMate.Mcp.Search.VectorStore(factory,
+            // Use a temp file under the system temp directory for the VectorStore; tests do not rely on persistent data
+            var store = new HgvMate.Mcp.Search.VectorStore(
+                Path.Combine(Path.GetTempPath(), $"admintest_{Guid.NewGuid()}.bin"),
                 NullLogger<HgvMate.Mcp.Search.VectorStore>.Instance);
             return new HgvMate.Mcp.Search.IndexingService(store, embedder, reader,
                 new SearchOptions(),
@@ -220,12 +220,6 @@ public sealed class AdminToolsTests
 
         public override Task SyncAllAsync(CancellationToken cancellationToken = default)
             => Task.CompletedTask;
-    }
-
-    private sealed class NullConnectionFactory : HgvMate.Mcp.Data.ISqliteConnectionFactory
-    {
-        public Microsoft.Data.Sqlite.SqliteConnection CreateConnection()
-            => new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
     }
 
     private sealed class FakeCredentialProvider : IGitCredentialProvider
