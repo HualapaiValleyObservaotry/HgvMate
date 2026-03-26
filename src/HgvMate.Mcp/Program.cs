@@ -166,13 +166,19 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
         ?? Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
     if (!string.IsNullOrEmpty(otlpEndpoint))
     {
+        var otlpTransport = "gRPC";
+        if (Uri.TryCreate(otlpEndpoint, UriKind.Absolute, out var parsedUri) && parsedUri.Port == 4318)
+        {
+            otlpTransport = "HTTP/protobuf";
+        }
+        Console.WriteLine($"[OTLP] Configuring OpenTelemetry export: endpoint={otlpEndpoint}, transport={otlpTransport}, service={serviceName}");
         services.AddOpenTelemetryExport(options =>
         {
             options.ServiceName = serviceName;
             options.ServiceVersion = serviceVersion;
             options.Endpoint = otlpEndpoint;
             // Auto-detect transport from endpoint: port 4318 = HTTP/protobuf, otherwise gRPC
-            if (Uri.TryCreate(otlpEndpoint, UriKind.Absolute, out var uri) && uri.Port == 4318)
+            if (otlpTransport == "HTTP/protobuf")
             {
                 options.Transport = HVO.Enterprise.Telemetry.OpenTelemetry.OtlpTransport.HttpProtobuf;
             }
@@ -180,6 +186,10 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
             options.EnableMetricsExport = true;
             options.EnableLogExport = true;
         });
+    }
+    else
+    {
+        Console.WriteLine("[OTLP] No OTLP endpoint configured — skipping OpenTelemetry export.");
     }
 
     services.AddTelemetryStatistics();
