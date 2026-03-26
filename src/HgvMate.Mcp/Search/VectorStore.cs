@@ -78,7 +78,10 @@ public class VectorStore
                 var chunkIndex = reader.ReadInt32();
                 var content = reader.ReadString();
 
-                var blob = reader.ReadBytes(embeddingDim * sizeof(float));
+                var expectedBytes = embeddingDim * sizeof(float);
+                var blob = reader.ReadBytes(expectedBytes);
+                if (blob.Length != expectedBytes)
+                    throw new InvalidDataException($"Truncated embedding at chunk {i}: expected {expectedBytes} bytes, got {blob.Length}.");
                 var embedding = BlobToFloats(blob);
 
                 _cache[(repo, file, chunkIndex)] = new CachedChunk(content, embedding);
@@ -98,6 +101,14 @@ public class VectorStore
     {
         var snapshot = _cache.ToArray();
         var embeddingDim = snapshot.Length > 0 ? snapshot[0].Value.Embedding.Length : 384;
+
+        // Validate all embeddings have consistent dimensions
+        for (int i = 0; i < snapshot.Length; i++)
+        {
+            if (snapshot[i].Value.Embedding.Length != embeddingDim)
+                throw new InvalidOperationException(
+                    $"Embedding dimension mismatch at chunk '{snapshot[i].Key.Repo}/{snapshot[i].Key.File}#{snapshot[i].Key.Index}': expected {embeddingDim}, got {snapshot[i].Value.Embedding.Length}.");
+        }
 
         var tempPath = _storagePath + ".tmp";
 
@@ -235,7 +246,7 @@ public class VectorStore
     /// One-time migration: reads all chunks from the legacy SQLite source_chunks table
     /// into the in-memory cache. Caller should follow with <see cref="SaveAsync"/> to persist.
     /// </summary>
-    public async Task MigrateFromSqliteAsync(Data.ISqliteConnectionFactory connectionFactory)
+    public async Task MigrateFromSqliteAsync(HgvMate.Mcp.Data.ISqliteConnectionFactory connectionFactory)
     {
         _logger.LogInformation("Migrating vector data from SQLite to binary format...");
         using var conn = connectionFactory.CreateConnection();

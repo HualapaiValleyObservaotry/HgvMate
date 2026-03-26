@@ -4,6 +4,10 @@ services:
     container_name: hgvmate-mcp
     environment:
       - HGVMATE_TRANSPORT=sse
+      # Clone repos to ephemeral local storage (fast, not persistent volume)
+      - RepoSync__ClonePath=/tmp/hgvmate/repos
+      # Reserve 1 GB free space to prevent filling ephemeral disk
+      - RepoSync__MinFreeDiskSpaceMb=1024
       # - GITHUB_TOKEN=your-github-pat
       # - AZURE_DEVOPS_PAT=your-azure-devops-pat
     ports:

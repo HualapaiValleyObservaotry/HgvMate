@@ -145,7 +145,13 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
     configuration.GetSection(CredentialOptions.SectionName).Bind(credentialOptions);
 
     Directory.CreateDirectory(dataPath);
-    Directory.CreateDirectory(Path.Combine(dataPath, repoSyncOptions.ClonePath));
+
+    // Resolve clone path: absolute paths use ephemeral local storage,
+    // relative paths resolve under dataPath (persistent storage)
+    var cloneRoot = Path.IsPathRooted(repoSyncOptions.ClonePath)
+        ? repoSyncOptions.ClonePath
+        : Path.Combine(dataPath, repoSyncOptions.ClonePath);
+    Directory.CreateDirectory(cloneRoot);
 
     var keysDir = new DirectoryInfo(Path.Combine(dataPath, "DataProtection-Keys"));
     services.AddDataProtection()

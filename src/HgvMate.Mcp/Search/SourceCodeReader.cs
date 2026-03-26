@@ -20,7 +20,12 @@ public class SourceCodeReader
     }
 
     public string GetRepoRoot(string repoName)
-        => Path.Combine(_hgvMateOptions.DataPath, _syncOptions.ClonePath, repoName);
+    {
+        var root = Path.IsPathRooted(_syncOptions.ClonePath)
+            ? _syncOptions.ClonePath
+            : Path.Combine(_hgvMateOptions.DataPath, _syncOptions.ClonePath);
+        return Path.Combine(root, repoName);
+    }
 
     /// <summary>
     /// Reads a file from a cloned repository, with path traversal protection.

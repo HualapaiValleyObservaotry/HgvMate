@@ -41,6 +41,9 @@ public class IndexingService
         _logger = logger;
     }
 
+    /// <summary>Persists pending vector store changes to disk.</summary>
+    public Task SaveVectorStoreAsync() => _vectorStore.SaveAsync();
+
     public virtual async Task<IndexResult> IndexRepoAsync(string repoName, CancellationToken cancellationToken = default)
     {
         var started = DateTime.UtcNow;
@@ -128,7 +131,7 @@ public class IndexingService
         }
 
         _vectorStore.UpsertChunks(sourceChunks);
-        await _vectorStore.SaveAsync();
+        // SaveAsync is deferred — callers (e.g. RepoSyncService) save once after processing all changed files.
     }
 
     private IReadOnlyList<string> ChunkText(string text)

@@ -47,7 +47,12 @@ public class RepoSyncService : BackgroundService
     }
 
     public string GetClonePath(string repoName)
-        => Path.Combine(_hgvMateOptions.DataPath, _syncOptions.ClonePath, repoName);
+    {
+        var root = Path.IsPathRooted(_syncOptions.ClonePath)
+            ? _syncOptions.ClonePath
+            : Path.Combine(_hgvMateOptions.DataPath, _syncOptions.ClonePath);
+        return Path.Combine(root, repoName);
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -170,6 +175,7 @@ public class RepoSyncService : BackgroundService
                         if (cancellationToken.IsCancellationRequested) break;
                         await _indexingService.IndexFileAsync(repo.Name, file, cancellationToken);
                     }
+                    await _indexingService.SaveVectorStoreAsync();
                     await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
                 }
                 else

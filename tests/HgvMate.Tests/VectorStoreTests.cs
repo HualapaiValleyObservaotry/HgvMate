@@ -118,7 +118,7 @@ public sealed class VectorStoreTests
     }
 
     [TestMethod]
-    public async Task Cache_IsLoadedAfterLoad()
+    public void Cache_IsLoadedAfterLoad()
     {
         Assert.IsTrue(_store.IsCacheLoaded);
     }

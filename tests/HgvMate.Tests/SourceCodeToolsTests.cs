@@ -12,7 +12,7 @@ public sealed class SourceCodeToolsTests
     private SourceCodeTools _tools = null!;
 
     [TestInitialize]
-    public void Setup()
+    public async Task Setup()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(_tempDir);
@@ -25,7 +25,7 @@ public sealed class SourceCodeToolsTests
 
         // Create a VectorStore backed by a temp file
         var vectorStore = new VectorStore(Path.Combine(_tempDir, "vectors.bin"), NullLogger<VectorStore>.Instance);
-        vectorStore.LoadAsync().GetAwaiter().GetResult();
+        await vectorStore.LoadAsync();
 
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null,
             NullLogger<OnnxEmbedder>.Instance);

@@ -198,7 +198,7 @@ public sealed class AdminToolsTests
             var embedder = new HgvMate.Mcp.Search.OnnxEmbedder(
                 (Microsoft.ML.OnnxRuntime.InferenceSession?)null,
                 NullLogger<HgvMate.Mcp.Search.OnnxEmbedder>.Instance);
-            // Use a temp file so VectorStore never hits real disk
+            // Use a temp file under the system temp directory for the VectorStore; tests do not rely on persistent data
             var store = new HgvMate.Mcp.Search.VectorStore(
                 Path.Combine(Path.GetTempPath(), $"admintest_{Guid.NewGuid()}.bin"),
                 NullLogger<HgvMate.Mcp.Search.VectorStore>.Instance);
