@@ -1,4 +1,5 @@
-using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
@@ -33,11 +34,26 @@ public sealed class JsonRepoRegistry : IRepoRegistry
 
     public async Task<RepoRecord> AddAsync(string name, string url, string branch, string source, string? addedBy = null)
     {
-        var id = Interlocked.Increment(ref _nextId);
-        var record = new RepoRecord(id, name, url, branch, source, true, null, null, addedBy);
-        await SaveRecordAsync(record);
-        _logger.LogInformation("Added repository {Name} (id={Id}).", name, id);
-        return record;
+        await _writeLock.WaitAsync();
+        try
+        {
+            var path = GetFilePath(name);
+            if (File.Exists(path))
+            {
+                _logger.LogWarning("Attempted to add repository {Name}, but a repository with that name already exists.", name);
+                throw new InvalidOperationException($"A repository with the name '{name}' already exists.");
+            }
+
+            var id = Interlocked.Increment(ref _nextId);
+            var record = new RepoRecord(id, name, url, branch, source, true, null, null, addedBy);
+            WriteRecord(path, record);
+            _logger.LogInformation("Added repository {Name} (id={Id}).", name, id);
+            return record;
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     public async Task<bool> RemoveAsync(string name)
@@ -135,7 +151,17 @@ public sealed class JsonRepoRegistry : IRepoRegistry
     private static string SanitizeFileName(string name)
     {
         var invalid = Path.GetInvalidFileNameChars();
-        return string.Concat(name.Select(c => invalid.Contains(c) ? '_' : c));
+        var sanitized = string.Concat(name.Select(c => invalid.Contains(c) ? '_' : c));
+
+        // If the name contained invalid characters, append a short hash to avoid collisions
+        // (e.g. "a/b" and "a?b" would both sanitize to "a_b" without this).
+        if (sanitized != name)
+        {
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(name)))[..8];
+            sanitized = $"{sanitized}_{hash}";
+        }
+
+        return sanitized;
     }
 
     private async Task<bool> UpdateAsync(string name, Func<RepoRecord, RepoRecord> mutate)
@@ -159,20 +185,6 @@ public sealed class JsonRepoRegistry : IRepoRegistry
         }
     }
 
-    private async Task SaveRecordAsync(RepoRecord record)
-    {
-        var path = GetFilePath(record.Name);
-        await _writeLock.WaitAsync();
-        try
-        {
-            WriteRecord(path, record);
-        }
-        finally
-        {
-            _writeLock.Release();
-        }
-    }
-
     private static void WriteRecord(string path, RepoRecord record)
     {
         var json = JsonSerializer.Serialize(record, JsonOptions);
@@ -181,15 +193,16 @@ public sealed class JsonRepoRegistry : IRepoRegistry
         File.Move(tempPath, path, overwrite: true);
     }
 
-    private static RepoRecord? LoadRecord(string path)
+    private RepoRecord? LoadRecord(string path)
     {
         try
         {
             var json = File.ReadAllText(path);
             return JsonSerializer.Deserialize<RepoRecord>(json, JsonOptions);
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Failed to load repo record from '{Path}'. Skipping file.", path);
             return null;
         }
     }

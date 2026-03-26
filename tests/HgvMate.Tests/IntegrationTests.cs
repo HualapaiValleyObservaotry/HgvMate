@@ -60,9 +60,7 @@ public sealed class IntegrationTests
         var searchOptions = new SearchOptions { MaxResults = 10 };
         var credOptions = new CredentialOptions();
 
-        var factory = new JsonRepoRegistry(_tempDir, NullLogger<JsonRepoRegistry>.Instance);
-
-        var registry = factory;
+        var registry = new JsonRepoRegistry(_tempDir, NullLogger<JsonRepoRegistry>.Instance);
         var credProvider = new GitCredentialProvider(credOptions, NullLogger<GitCredentialProvider>.Instance);
 
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null, NullLogger<OnnxEmbedder>.Instance);
@@ -126,8 +124,7 @@ public sealed class IntegrationTests
         var searchOptions = new SearchOptions { MaxResults = 10 };
         var credOptions = new CredentialOptions();
 
-        var factory = new JsonRepoRegistry(_tempDir, NullLogger<JsonRepoRegistry>.Instance);
-        var registry = factory;
+        var registry = new JsonRepoRegistry(_tempDir, NullLogger<JsonRepoRegistry>.Instance);
         var credProvider = new GitCredentialProvider(credOptions, NullLogger<GitCredentialProvider>.Instance);
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null, NullLogger<OnnxEmbedder>.Instance);
         var reader = new SourceCodeReader(hgvOptions, syncOptions, NullLogger<SourceCodeReader>.Instance);
