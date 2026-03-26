@@ -47,7 +47,7 @@ public class GitNexusService
             }
 
             var output = await RunGitNexusCommandAsync(
-                $"query symbol \"{EscapeArg(symbolName)}\"",
+                $"context \"{EscapeArg(symbolName)}\" -r {repo}",
                 repoPath, cancellationToken);
             if (!string.IsNullOrWhiteSpace(output))
                 results.Add($"[{repo}]\n{output}");
@@ -71,7 +71,7 @@ public class GitNexusService
             }
 
             var output = await RunGitNexusCommandAsync(
-                $"query references \"{EscapeArg(symbolName)}\"",
+                $"query \"{EscapeArg(symbolName)}\" -r {repo}",
                 repoPath, cancellationToken);
             if (!string.IsNullOrWhiteSpace(output))
                 results.Add($"[{repo}]\n{output}");
@@ -95,7 +95,7 @@ public class GitNexusService
             }
 
             var output = await RunGitNexusCommandAsync(
-                $"query callchain \"{EscapeArg(symbolName)}\"",
+                $"context \"{EscapeArg(symbolName)}\" -r {repo}",
                 repoPath, cancellationToken);
             if (!string.IsNullOrWhiteSpace(output))
                 results.Add($"[{repo}]\n{output}");
@@ -119,7 +119,7 @@ public class GitNexusService
             }
 
             var output = await RunGitNexusCommandAsync(
-                $"query impact \"{EscapeArg(symbolName)}\"",
+                $"impact \"{EscapeArg(symbolName)}\" -r {repo}",
                 repoPath, cancellationToken);
             if (!string.IsNullOrWhiteSpace(output))
                 results.Add($"[{repo}]\n{output}");

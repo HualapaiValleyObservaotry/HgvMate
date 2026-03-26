@@ -13,6 +13,7 @@ namespace HgvMate.Tests;
 /// They are skipped (Inconclusive) if Docker is not available.
 /// </summary>
 [TestClass]
+[TestCategory("Docker")]
 public sealed class DockerTests
 {
     private const string ImageName = "hgvmate-test";
