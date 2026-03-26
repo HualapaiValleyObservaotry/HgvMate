@@ -195,7 +195,7 @@ public sealed class VectorStoreTests
         queryVec[0] = 1.0f;
         var results = store2.Search(queryVec, limit: 1);
         Assert.HasCount(1, results);
-        Assert.IsGreaterThan(results[0].Score, 0.5f, "Embedding should be preserved and searchable.");
+        Assert.IsGreaterThan(0.5f, results[0].Score, "Embedding should be preserved and searchable.");
     }
 
     [TestMethod]
