@@ -18,19 +18,20 @@
 set -euo pipefail
 
 HOST="${1:-192.168.2.104}"
+USER="deploy"
 TAG="${2:-latest}"
 IMAGE="ghcr.io/roysalisbury/hgvmate:${TAG}"
 REMOTE_DIR="/opt/hgvmate"
 
-echo "==> Deploying ${IMAGE} to ${HOST}..."
+echo "==> Deploying ${IMAGE} to ${USER}@${HOST}..."
 
 # 1. Copy compose file if it has changed
 echo "==> Syncing compose file..."
-scp -q docker-compose.proxmox.yml "${HOST}:${REMOTE_DIR}/docker-compose.yml"
+scp -q docker-compose.proxmox.yml "${USER}@${HOST}:${REMOTE_DIR}/docker-compose.yml"
 
 # 2. Pull the latest image and restart
 echo "==> Pulling image and restarting..."
-ssh "${HOST}" bash -s <<EOF
+ssh "${USER}@${HOST}" bash -s <<EOF
   set -euo pipefail
   cd ${REMOTE_DIR}
   docker compose pull hgvmate

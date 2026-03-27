@@ -43,7 +43,8 @@
 		"HGVMATE_DATA_PATH": "/workspaces/HgvMate/.data",
 		"TAILSCALE_AUTHKEY": "${localEnv:TAILSCALE_AUTHKEY}",
 		"PVE_TOKEN": "${localEnv:PVE_TOKEN}",
-		"PVE_HOST": "${localEnv:PVE_HOST}"
+		"PVE_HOST": "${localEnv:PVE_HOST}",
+		"SSH_PRIVATE_KEY": "${localEnv:SSH_PRIVATE_KEY}"
 	},
 	"mounts": [
 		"source=hgvmate-data,target=/workspaces/HgvMate/.data,type=volume"

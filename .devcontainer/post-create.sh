@@ -67,6 +67,17 @@ else
 	echo "Using existing SSH agent at $SSH_AUTH_SOCK"
 fi
 
+# Restore SSH key from Codespace secret (survives rebuilds)
+if [ -n "${SSH_PRIVATE_KEY:-}" ] && [ ! -f /home/vscode/.ssh/id_ed25519 ]; then
+	echo "Restoring SSH key from Codespace secret..."
+	mkdir -p /home/vscode/.ssh
+	echo "$SSH_PRIVATE_KEY" > /home/vscode/.ssh/id_ed25519
+	chmod 600 /home/vscode/.ssh/id_ed25519
+	ssh-keygen -y -f /home/vscode/.ssh/id_ed25519 > /home/vscode/.ssh/id_ed25519.pub
+	chmod 644 /home/vscode/.ssh/id_ed25519.pub
+	echo "SSH key restored."
+fi
+
 # Try to load SSH keys if available
 if compgen -G "/home/vscode/.ssh/id_*" >/dev/null 2>&1; then
 	for key in /home/vscode/.ssh/id_*; do
