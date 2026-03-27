@@ -61,7 +61,7 @@ The included `docker-compose.yml` sets recommended resource limits (2 vCPU, 2 GB
 | **Memory** | 2 GB | 4 GB |
 | **Data volume** | 20 GB | 40 GB+ |
 
-Resource limits **cannot** be set in the Dockerfile — they are applied at deployment time via `docker run` flags, `docker-compose.yml`, or your orchestrator (Kubernetes, ACA, etc.).
+Resource limits **cannot** be set in the Dockerfile — they are applied at deployment time via `docker run` flags, `docker-compose.yml`, or your orchestrator (Kubernetes, Proxmox, etc.).
 
 **With `docker run`:**
 
@@ -178,4 +178,4 @@ dotnet test --filter "FullyQualifiedName!~DockerTests&FullyQualifiedName!~LiveOn
 - ONNX Runtime (all-MiniLM-L6-v2 local embeddings)
 - OpenAPI + Scalar (API documentation)
 - MSTest 4.x
-- Docker (Alpine multi-stage build)
+- Docker (Ubuntu multi-stage build)

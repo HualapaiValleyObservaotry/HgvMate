@@ -37,7 +37,7 @@ RUN mkdir -p /app/models && \
 
 VOLUME /data
 ENV HgvMate__DataPath=/data
-# Clone repos to ephemeral local storage (fast SSD, not Azure Files SMB)
+# Clone repos to ephemeral local storage (fast SSD, not network-mounted volume)
 ENV RepoSync__ClonePath=/tmp/hgvmate/repos
 # Reserve 1 GB free space on ephemeral disk to prevent filling it
 ENV RepoSync__MinFreeDiskSpaceMb=1024

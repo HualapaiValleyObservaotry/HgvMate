@@ -16,7 +16,7 @@ public record VectorSearchResult(string RepoName, string FilePath, int ChunkInde
 /// <summary>
 /// Stores source code embeddings in a binary file and serves searches from an in-memory cache.
 /// Replaces the previous SQLite-backed implementation to eliminate lock contention on network
-/// filesystems (Azure Files/SMB) where SQLite's locking model is unreliable.
+/// filesystems where SQLite's locking model is unreliable.
 /// </summary>
 public class VectorStore
 {

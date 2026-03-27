@@ -10,7 +10,7 @@ HgvMate is an MCP (Model Context Protocol) server that gives VS Code Copilot Cha
 2. **Semantic** — ONNX embeddings (all-MiniLM-L6-v2) + sqlite-vec for "find code that does X" queries
 3. **Structural** — GitNexus (tree-sitter AST parsing + graph DB) for call chains, blast radius, and symbol references
 
-All 11 MCP tools are prefixed `hgvmate_*`. Supports both stdio and SSE transports. Runs locally via `dotnet run`, in a Docker container, or on Azure Container Apps. GitNexus is embedded in the container and orchestrated transparently — users see only HgvMate tools.
+All 11 MCP tools are prefixed `hgvmate_*`. Supports both stdio and SSE transports. Runs locally via `dotnet run`, in a Docker container, or on Proxmox. GitNexus is embedded in the container and orchestrated transparently — users see only HgvMate tools.
 
 The ONNX model is an **encoder** (text → 384-dim vector), not an LLM. Copilot (remote) provides all reasoning. GitNexus is fully deterministic — no AI/ML.
 
@@ -19,13 +19,13 @@ The ONNX model is an **encoder** (text → 384-dim vector), not an LLM. Copilot 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Repo management | Admin tool calls (add/remove/reindex) | Dynamic, no coupling to Tex workspace or submodules |
-| Transport | Both stdio + SSE (config-driven) | stdio for local dev, SSE for Azure Container App |
+| Transport | Both stdio + SSE (config-driven) | stdio for local dev, SSE for remote/Proxmox |
 | Tool naming | `hgvmate_*` prefix | Avoid collisions with other MCP servers |
-| Git credentials | Per-source PAT + Managed Identity fallback | Each repo source (GitHub, Azure DevOps) uses its own PAT; MI fallback for Azure |
+| Git credentials | Per-source PAT | Each repo source (GitHub, Azure DevOps) uses its own PAT |
 | Search layers | git grep + ONNX/sqlite-vec + GitNexus | Text, semantic, and structural — each answers different questions |
 | Persistence | Single `/data` volume with SQLite | One mount point, survives container updates, no external DB |
 | Structural analysis | GitNexus embedded in container (Option B) | Transparent orchestration, no separate deployment |
-| Docker base | Alpine | Smallest image — .NET, Node.js, git, ONNX all have Alpine support |
+| Docker base | Ubuntu 24.04 | Supports tree-sitter native build tools required by GitNexus |
 | Test framework | MSTest with in-memory SQLite | No Docker/volume needed for CI pipelines |
 | PR/repo | Do not submit PR until instructed | Project lives in Tex workspace temporarily; will move to own repo |
 
@@ -69,11 +69,16 @@ docker run -i --rm -v hgvmate-data:/data -e AZURE_DEVOPS_PAT=... hgvmate:latest
 - Named volume `hgvmate-data` persists across container rebuilds
 - Copilot connects via stdio in `.vscode/mcp.json`
 
-### Mode 3: Azure Container App (remote)
+### Mode 3: Proxmox (remote)
 
-- SSE transport, HTTPS endpoint
-- Azure Files volume mounted at `/data`
-- Managed Identity for git credentials (no PAT to manage)
+```bash
+docker compose -f docker-compose.proxmox.yml up -d
+```
+
+- SSE transport, HTTP endpoint
+- Bind-mount `/opt/hgvmate/data` at `/data` for persistence
+- Aspire Dashboard sidecar for telemetry
+- PAT-based git credentials via environment variables
 
 ## Implementation Phases
 
@@ -83,10 +88,10 @@ docker run -i --rm -v hgvmate-data:/data -e AZURE_DEVOPS_PAT=... hgvmate:latest
 
 | Step | Description |
 |------|-------------|
-| 1 | **NuGet packages** — `ModelContextProtocol`, `Microsoft.ML.OnnxRuntime`, `Microsoft.Data.Sqlite`, `Microsoft.Extensions.Hosting`, `Azure.Identity` |
+| 1 | **NuGet packages** — `ModelContextProtocol`, `Microsoft.ML.OnnxRuntime`, `Microsoft.Extensions.Hosting` |
 | 2 | **Configuration model** — `HgvMateOptions` (DataPath, Transport), `RepoSyncOptions` (PollIntervalMinutes, ClonePath), `SearchOptions`, `CredentialOptions` in `Configuration/` |
 | 3 | **Program.cs** — `HostApplicationBuilder` with MCP server, DI, hosted services. Resolve DataPath from env var → config → `./data`. Ensure directories exist. Transport selection from config |
-| 4 | **Git credential provider** — `GitCredentialProvider`: resolves credentials per repo source. For `github` repos, uses `GITHUB_TOKEN`. For `azuredevops` repos, uses `AZURE_DEVOPS_PAT`. Falls back to `DefaultAzureCredential` (managed identity) when running in Azure. Injects auth into git clone/pull commands |
+| 4 | **Git credential provider** — `GitCredentialProvider`: resolves credentials per repo source. For `github` repos, uses `GITHUB_TOKEN`. For `azuredevops` repos, uses `AZURE_DEVOPS_PAT`. Injects auth into git clone/pull commands |
 | 5 | **SQLite initialization** — Open/create `/data/hgvmate.db`, run schema migrations (idempotent). Tables: `repositories` |
 
 ### Phase 2: Repository Management
@@ -232,16 +237,16 @@ HgvMate/
 │   │   └── StructuralTools.cs
 │   ├── Repos/
 │   │   ├── IRepoRegistry.cs
-│   │   ├── SqliteRepoRegistry.cs
+│   │   ├── JsonRepoRegistry.cs
 │   │   ├── RepoSyncService.cs
-│   │   ├── GitCredentialProvider.cs
-│   │   └── GitNexusService.cs
+│   │   └── GitCredentialProvider.cs
 │   └── Search/
 │       ├── OnnxEmbedder.cs
 │       ├── VectorStore.cs
 │       ├── IndexingService.cs
 │       ├── HybridSearchService.cs
 │       ├── GitGrepSearchService.cs
+│       ├── GitNexusService.cs
 │       └── SourceCodeReader.cs
 └── tests/HgvMate.Tests/
     ├── HgvMate.Tests.csproj
@@ -270,16 +275,15 @@ HgvMate/
 - Background repo sync with incremental change monitoring
 - ONNX embeddings + sqlite-vec vector search
 - Both stdio and SSE transports
-- Managed Identity + PAT credential fallback
+- PAT credential support per repo source
 - Persistent volume architecture (survives container updates)
-- Docker packaging (Alpine, multi-stage with Node.js + .NET)
+- Docker packaging (Ubuntu 24.04, multi-stage with Node.js + .NET)
 - Local dev mode (`dotnet run` with local `./data` folder)
 
 **Excluded (future tiers):**
 
 - DB log queries (`hgvmate_query_db_logs`)
 - Azure DevOps work items (`hgvmate_create_bug`, `hgvmate_create_story`)
-- Entra ID user auth validation on SSE endpoint
 - Webhook-based change detection (Azure DevOps service hooks)
 - Cross-repo interaction tracing (runtime/Datadog needed)
 

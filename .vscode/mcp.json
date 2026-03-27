@@ -2,7 +2,7 @@
   "servers": {
     "hgvmate-sse": {
       "type": "http",
-      "url": "https://hgvmate-mcp.wonderfulwater-cd206d2a.westus2.azurecontainerapps.io/mcp"
+      "url": "http://localhost:5000/mcp"
     }
   }
 }

@@ -13,7 +13,6 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0-rc.2.*" />
     <PackageReference Include="ModelContextProtocol" Version="0.3.0-preview.1" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="0.3.0-preview.1" />
-    <PackageReference Include="Azure.Identity" Version="1.13.2" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.24.4" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.1" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.15.0" />
