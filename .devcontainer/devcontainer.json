@@ -12,6 +12,12 @@
 		"ghcr.io/devcontainers/features/azure-cli:1": {}
 	},
 	"customizations": {
+		"codespaces": {
+			"permissions": {
+				"packages": "write",
+				"actions": "write"
+			}
+		},
 		"vscode": {
 			"extensions": [
 				"ms-dotnettools.csdevkit",
