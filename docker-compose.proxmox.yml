@@ -10,7 +10,7 @@
 
 services:
   hgvmate:
-    image: ghcr.io/roysalisbury/hgvmate:latest
+    image: ghcr.io/roysalisbury/hgvmate:${HGVMATE_TAG:-latest}
     container_name: hgvmate-mcp
     environment:
       - HGVMATE_TRANSPORT=sse
@@ -43,9 +43,11 @@ services:
     restart: unless-stopped
 
   aspire-dashboard:
-    image: mcr.microsoft.com/dotnet/aspire-dashboard:latest
+    image: ${ASPIRE_DASHBOARD_IMAGE:-mcr.microsoft.com/dotnet/aspire-dashboard:9.0}
     container_name: aspire-dashboard
     environment:
+      # Allow anonymous access on a trusted internal network only.
+      # Remove this variable if the dashboard port is exposed to untrusted users.
       - DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS=true
     ports:
       - "18888:18888"

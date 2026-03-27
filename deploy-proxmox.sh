@@ -34,6 +34,7 @@ echo "==> Pulling image and restarting..."
 ssh "${USER}@${HOST}" bash -s <<EOF
   set -euo pipefail
   cd ${REMOTE_DIR}
+  export HGVMATE_TAG=${TAG}
   docker compose pull hgvmate
   docker compose up -d --force-recreate hgvmate
   echo "==> Deployed. Waiting for health..."
