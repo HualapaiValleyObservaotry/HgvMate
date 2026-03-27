@@ -18,7 +18,7 @@
 set -euo pipefail
 
 HOST="${1:-192.168.2.104}"
-USER="deploy"
+USER="root"
 TAG="${2:-latest}"
 IMAGE="ghcr.io/roysalisbury/hgvmate:${TAG}"
 REMOTE_DIR="/opt/hgvmate"
