@@ -5,8 +5,8 @@
 #   ./deploy-proxmox.sh [proxmox-host] [image-tag]
 #
 # Examples:
-#   ./deploy-proxmox.sh 192.168.2.244              # latest image
-#   ./deploy-proxmox.sh 192.168.2.244 c73c08e      # specific SHA tag
+#   ./deploy-proxmox.sh 192.168.2.104              # latest image
+#   ./deploy-proxmox.sh 192.168.2.104 c73c08e      # specific SHA tag
 #
 # Prerequisites on the Proxmox host:
 #   - Docker Engine installed (apt install docker.io docker-compose-plugin)
@@ -17,7 +17,7 @@
 
 set -euo pipefail
 
-HOST="${1:-192.168.2.244}"
+HOST="${1:-192.168.2.104}"
 TAG="${2:-latest}"
 IMAGE="ghcr.io/roysalisbury/hgvmate:${TAG}"
 REMOTE_DIR="/opt/hgvmate"
