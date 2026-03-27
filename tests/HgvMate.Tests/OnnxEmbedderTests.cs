@@ -81,4 +81,36 @@ public sealed class OnnxEmbedderTests
         Assert.AreEqual(101, tokens[0]);
         Assert.AreEqual(102, tokens[^1]);
     }
+
+    // ─── Batch embedding tests ───────────────────────────────────────────────
+
+    [TestMethod]
+    public async Task EmbedBatchAsync_WithoutModel_ReturnsZeroVectors()
+    {
+        var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null,
+            NullLogger<OnnxEmbedder>.Instance);
+        var results = await embedder.EmbedBatchAsync(["hello world", "foo bar"]);
+        Assert.HasCount(2, results);
+        Assert.IsTrue(results[0].All(static v => v == 0f));
+        Assert.IsTrue(results[1].All(static v => v == 0f));
+    }
+
+    [TestMethod]
+    public async Task EmbedBatchAsync_EmptyList_ReturnsEmptyArray()
+    {
+        var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null,
+            NullLogger<OnnxEmbedder>.Instance);
+        var results = await embedder.EmbedBatchAsync([]);
+        Assert.HasCount(0, results);
+    }
+
+    [TestMethod]
+    public async Task EmbedBatchAsync_SingleItem_ReturnsSingleVector()
+    {
+        var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null,
+            NullLogger<OnnxEmbedder>.Instance);
+        var results = await embedder.EmbedBatchAsync(["hello world"]);
+        Assert.HasCount(1, results);
+        Assert.HasCount(384, results[0]);
+    }
 }

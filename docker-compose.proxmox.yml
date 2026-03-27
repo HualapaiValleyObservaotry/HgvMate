@@ -12,6 +12,7 @@ services:
   hgvmate:
     image: ghcr.io/roysalisbury/hgvmate:latest
     container_name: hgvmate-mcp
+    env_file: .env
     environment:
       - HGVMATE_TRANSPORT=sse
       # Relative path = resolves under /data → persistent NVMe storage
@@ -20,9 +21,6 @@ services:
       - RepoSync__MinFreeDiskSpaceMb=2048
       # Telemetry → Aspire Dashboard sidecar
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://aspire-dashboard:18889
-      # Credentials (set these or use a .env file)
-      # - GITHUB_TOKEN=
-      # - AZURE_DEVOPS_PAT=
     ports:
       - "5000:5000"
     volumes:
