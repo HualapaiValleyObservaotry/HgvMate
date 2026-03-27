@@ -1,5 +1,6 @@
 using HgvMate.Mcp.Configuration;
 using HgvMate.Mcp.Search;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HgvMate.Tests;
@@ -35,7 +36,7 @@ public sealed class LiveOnnxTests
         {
             // Use OnnxEmbedder's built-in auto-download mechanism
             var options = new HgvMateOptions { DataPath = TestDataPath };
-            _embedder = new OnnxEmbedder(options, NullLogger<OnnxEmbedder>.Instance);
+            _embedder = new OnnxEmbedder(options, new SearchOptions(), NullLogger<OnnxEmbedder>.Instance);
         }
         else
         {
@@ -48,7 +49,7 @@ public sealed class LiveOnnxTests
             {
                 DataPath = Path.GetDirectoryName(Path.GetDirectoryName(modelPath))!
             };
-            _embedder = new OnnxEmbedder(options, NullLogger<OnnxEmbedder>.Instance);
+            _embedder = new OnnxEmbedder(options, new SearchOptions(), NullLogger<OnnxEmbedder>.Instance);
         }
     }
 

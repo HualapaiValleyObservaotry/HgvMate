@@ -94,7 +94,12 @@ public static class ApiEndpoints
                 Embedder = new
                 {
                     Available = embedder.IsAvailable,
-                    Model = "all-MiniLM-L6-v2"
+                    Model = "all-MiniLM-L6-v2",
+                    embedder.ModelType,
+                    embedder.ExecutionProvider,
+                    embedder.ThreadCount,
+                    embedder.BatchSize,
+                    Dimensions = embedder.Dimensions
                 },
                 Disk = new
                 {

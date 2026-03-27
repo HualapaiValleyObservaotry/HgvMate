@@ -5,6 +5,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- ONNX execution provider: cpu (default), cuda, directml, openvino -->
+    <OnnxProvider Condition="'$(OnnxProvider)' == ''">cpu</OnnxProvider>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,7 +15,15 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0-rc.2.*" />
     <PackageReference Include="ModelContextProtocol" Version="0.3.0-preview.1" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="0.3.0-preview.1" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.24.4" />
+    <!-- ONNX Runtime: package selected by OnnxProvider property.
+         cpu      = default, all platforms
+         cuda     = NVIDIA GPU (Linux/Windows)
+         directml = Windows GPU via DirectX
+         openvino = Intel CPU/iGPU optimization (Windows NuGet; Linux requires custom build) -->
+    <PackageReference Condition="'$(OnnxProvider)' == 'cpu'" Include="Microsoft.ML.OnnxRuntime" Version="1.24.4" />
+    <PackageReference Condition="'$(OnnxProvider)' == 'cuda'" Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.24.4" />
+    <PackageReference Condition="'$(OnnxProvider)' == 'directml'" Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
+    <PackageReference Condition="'$(OnnxProvider)' == 'openvino'" Include="Intel.ML.OnnxRuntime.OpenVino" Version="1.24.1" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.1" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Process" Version="1.15.0-beta.1" />

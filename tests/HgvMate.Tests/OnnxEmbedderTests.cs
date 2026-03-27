@@ -1,3 +1,4 @@
+using HgvMate.Mcp.Configuration;
 using HgvMate.Mcp.Search;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -80,5 +81,83 @@ public sealed class OnnxEmbedderTests
         var tokens = OnnxEmbedder.SimpleTokenize("");
         Assert.AreEqual(101, tokens[0]);
         Assert.AreEqual(102, tokens[^1]);
+    }
+
+    // ─── Batch embedding tests ───────────────────────────────────────────────
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task EmbedBatchAsync_WithoutModel_ReturnsZeroVectors()
+    {
+        var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null,
+            NullLogger<OnnxEmbedder>.Instance);
+        var texts = new List<string> { "hello", "world", "test" };
+        var results = await embedder.EmbedBatchAsync(texts);
+
+        Assert.HasCount(3, results);
+        foreach (var result in results)
+        {
+            Assert.HasCount(384, result);
+            Assert.IsTrue(result.All(static v => v == 0f));
+        }
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task EmbedBatchAsync_EmptyList_ReturnsEmptyList()
+    {
+        var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null,
+            NullLogger<OnnxEmbedder>.Instance);
+        var results = await embedder.EmbedBatchAsync(new List<string>());
+        Assert.IsEmpty(results);
+    }
+
+    // ─── SessionOptions auto-detection tests ─────────────────────────────────
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CreateSessionOptions_AutoDetect_SetsThreadsToHalfCpus()
+    {
+        var searchOptions = new SearchOptions { OnnxThreadCount = 0 };
+        var (options, providerName) = OnnxEmbedder.CreateSessionOptions(searchOptions);
+
+        int expected = Math.Clamp(Environment.ProcessorCount / 2, 1, 16);
+        Assert.AreEqual(expected, options.IntraOpNumThreads);
+        Assert.AreEqual(1, options.InterOpNumThreads);
+        Assert.IsFalse(string.IsNullOrEmpty(providerName));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CreateSessionOptions_ExplicitThreadCount_Honored()
+    {
+        var searchOptions = new SearchOptions { OnnxThreadCount = 6 };
+        var (options, providerName) = OnnxEmbedder.CreateSessionOptions(searchOptions);
+
+        Assert.AreEqual(6, options.IntraOpNumThreads);
+        Assert.AreEqual(1, options.InterOpNumThreads);
+        Assert.IsFalse(string.IsNullOrEmpty(providerName));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CreateSessionOptions_GraphOptimization_EnabledAll()
+    {
+        var searchOptions = new SearchOptions { OnnxThreadCount = 2 };
+        var (options, _) = OnnxEmbedder.CreateSessionOptions(searchOptions);
+
+        Assert.AreEqual(Microsoft.ML.OnnxRuntime.GraphOptimizationLevel.ORT_ENABLE_ALL,
+            options.GraphOptimizationLevel);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CreateSessionOptions_ReturnsProviderName()
+    {
+        var searchOptions = new SearchOptions { OnnxThreadCount = 2 };
+        var (_, providerName) = OnnxEmbedder.CreateSessionOptions(searchOptions);
+
+        // In CI/test environment without GPU, should fall back to CPU
+        Assert.AreEqual("CPU", providerName);
     }
 }

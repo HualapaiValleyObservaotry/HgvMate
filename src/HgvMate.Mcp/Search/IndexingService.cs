@@ -72,6 +72,7 @@ public class IndexingService
         var files = GetIndexableFiles(repoRoot);
         int fileCount = 0, chunkCount = 0, skippedCount = 0;
         var skippedFiles = new List<string>();
+        int batchSize = _searchOptions.OnnxBatchSize;
 
         foreach (var filePath in files)
         {
@@ -83,11 +84,17 @@ public class IndexingService
                 var chunks = ChunkText(content);
                 var sourceChunks = new List<SourceChunk>();
 
-                for (int i = 0; i < chunks.Count; i++)
+                // Process chunks in batches for efficient ONNX inference
+                for (int batchStart = 0; batchStart < chunks.Count; batchStart += batchSize)
                 {
-                    var embedding = await _embedder.EmbedAsync(chunks[i], cancellationToken);
-                    sourceChunks.Add(new SourceChunk(repoName, relativePath, i, chunks[i], embedding));
-                    chunkCount++;
+                    var batch = chunks.Skip(batchStart).Take(batchSize).ToList();
+                    var embeddings = await _embedder.EmbedBatchAsync(batch, cancellationToken);
+
+                    for (int j = 0; j < batch.Count; j++)
+                    {
+                        sourceChunks.Add(new SourceChunk(repoName, relativePath, batchStart + j, batch[j], embeddings[j]));
+                        chunkCount++;
+                    }
                 }
 
                 _vectorStore.UpsertChunks(sourceChunks);
@@ -137,11 +144,15 @@ public class IndexingService
         var content = await File.ReadAllTextAsync(fullPath, cancellationToken);
         var chunks = ChunkText(content);
         var sourceChunks = new List<SourceChunk>();
+        int batchSize = _searchOptions.OnnxBatchSize;
 
-        for (int i = 0; i < chunks.Count; i++)
+        for (int batchStart = 0; batchStart < chunks.Count; batchStart += batchSize)
         {
-            var embedding = await _embedder.EmbedAsync(chunks[i], cancellationToken);
-            sourceChunks.Add(new SourceChunk(repoName, relativePath, i, chunks[i], embedding));
+            var batch = chunks.Skip(batchStart).Take(batchSize).ToList();
+            var embeddings = await _embedder.EmbedBatchAsync(batch, cancellationToken);
+
+            for (int j = 0; j < batch.Count; j++)
+                sourceChunks.Add(new SourceChunk(repoName, relativePath, batchStart + j, batch[j], embeddings[j]));
         }
 
         _vectorStore.UpsertChunks(sourceChunks);

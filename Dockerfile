@@ -15,8 +15,9 @@ RUN dotnet_rid="linux-$([ "$TARGETARCH" = "amd64" ] && echo x64 || echo $TARGETA
 FROM ubuntu:24.04 AS runtime
 
 # git (repo operations) + curl (model download) + .NET self-contained native deps
+# libgomp1 is required by ONNX Runtime for OpenMP-based CPU parallelism
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl ca-certificates libstdc++6 libicu74 \
+    git curl ca-certificates libstdc++6 libicu74 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js 22 (required by GitNexus / @ladybugdb/core which needs Node 20+ and glibc 2.38+)
@@ -30,8 +31,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
 WORKDIR /app
 COPY --from=build /app .
 
-# Download the all-MiniLM-L6-v2 ONNX model (~80 MB)
+# Download INT8 quantized ONNX model (~30 MB, faster CPU inference than FP32)
+# Also download FP32 model as fallback (~80 MB)
 RUN mkdir -p /app/models && \
+    curl -fSL -o /app/models/all-MiniLM-L6-v2-quantized.onnx \
+    "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model_quantized.onnx" && \
     curl -fSL -o /app/models/all-MiniLM-L6-v2.onnx \
     "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx"
 

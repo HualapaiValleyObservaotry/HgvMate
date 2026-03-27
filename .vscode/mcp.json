@@ -2,7 +2,7 @@
   "servers": {
     "hgvmate-sse": {
       "type": "http",
-      "url": "http://localhost:5000/mcp"
+      "url": "http://192.168.2.104:5000/mcp"
     }
   }
 }
