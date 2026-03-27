@@ -253,6 +253,67 @@ public sealed class RepoSyncServiceTests
     // ─── Regression: UpdateLastSha ordering ──────────────────────────────────
 
     [TestMethod]
+    [TestCategory("Unit")]
+    public async Task SyncRepoAsync_SkipsReindex_WhenReclonedButShaUnchangedAndVectorsExist()
+    {
+        const string sha = "aabbcc";
+        // Repo has a known SHA from a previous sync
+        var repo = new RepoRecord(1, "myrepo", "https://example.com/r.git", "main", "github", true, sha, null, null);
+
+        var clonePath = Path.Combine(_tempDir, "repos", "myrepo");
+        // .git does NOT exist → simulates ephemeral wipe / re-clone scenario
+        Directory.CreateDirectory(clonePath);
+
+        var responses = new Dictionary<string[], (string, int)>(StringArrayComparer.Instance)
+        {
+            {
+                ["clone", "--depth", "1", "--single-branch", "--branch", "main", "https://example.com/r.git", "."],
+                ("", 0)
+            },
+            { ["rev-parse", "HEAD"], (sha + "\n", 0) }
+        };
+
+        var (svc, indexing, registry) = await BuildServiceAsync(_tempDir, responses);
+
+        // Pre-populate vector store with chunks for this repo (simulates persistent vectors)
+        indexing.VectorStore.UpsertChunk(new SourceChunk("myrepo", "src/Foo.cs", 0, "content", new float[384]));
+
+        await svc.SyncRepoAsync(repo);
+
+        Assert.AreEqual(0, indexing.IndexRepoCalls, "Should skip vector re-index when SHA matches and vectors exist.");
+        Assert.AreEqual(0, indexing.IndexFileCalls, "Should not do incremental index either.");
+        Assert.IsTrue(registry.LastShaUpdates.ContainsKey("myrepo"), "SHA should still be updated.");
+        Assert.AreEqual(sha, registry.LastShaUpdates["myrepo"]);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task SyncRepoAsync_FullIndex_WhenReclonedShaUnchangedButNoVectors()
+    {
+        const string sha = "aabbcc";
+        var repo = new RepoRecord(1, "myrepo", "https://example.com/r.git", "main", "github", true, sha, null, null);
+
+        var clonePath = Path.Combine(_tempDir, "repos", "myrepo");
+        Directory.CreateDirectory(clonePath); // no .git → re-clone
+
+        var responses = new Dictionary<string[], (string, int)>(StringArrayComparer.Instance)
+        {
+            {
+                ["clone", "--depth", "1", "--single-branch", "--branch", "main", "https://example.com/r.git", "."],
+                ("", 0)
+            },
+            { ["rev-parse", "HEAD"], (sha + "\n", 0) }
+        };
+
+        var (svc, indexing, _) = await BuildServiceAsync(_tempDir, responses);
+
+        // No vectors pre-populated — should force full index
+        await svc.SyncRepoAsync(repo);
+
+        Assert.AreEqual(1, indexing.IndexRepoCalls, "Should full-index when re-cloned and no cached vectors.");
+    }
+
+    [TestMethod]
     public async Task SyncRepoAsync_UpdatesShaAfterIndexing_NotBefore()
     {
         const string oldSha = "aabbcc";
@@ -419,6 +480,7 @@ public sealed class RepoSyncServiceTests
         public int IndexRepoCalls { get; private set; }
         public int IndexFileCalls { get; private set; }
         public List<string> IndexedFiles { get; } = [];
+        public VectorStore VectorStore { get; }
 
         public TrackingIndexingService(
             VectorStore vectorStore,
@@ -426,7 +488,9 @@ public sealed class RepoSyncServiceTests
             SourceCodeReader reader,
             SearchOptions searchOptions)
             : base(vectorStore, embedder, reader, searchOptions, NullLogger<IndexingService>.Instance)
-        { }
+        {
+            VectorStore = vectorStore;
+        }
 
         public override Task<IndexResult> IndexRepoAsync(string repoName, CancellationToken cancellationToken = default)
         {

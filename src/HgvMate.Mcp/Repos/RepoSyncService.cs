@@ -163,10 +163,23 @@ public class RepoSyncService : BackgroundService
 
             if (isFirstSync || string.IsNullOrEmpty(oldSha))
             {
-                // First sync: full index
-                await _indexingService.IndexRepoAsync(repo.Name, cancellationToken);
-                await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
-                await _registry.UpdateLastShaAsync(repo.Name, newSha);
+                // Re-cloned repo: skip vector re-index if SHA unchanged and vectors already cached
+                if (isFirstSync && newSha == oldSha && _indexingService.HasVectorsForRepo(repo.Name))
+                {
+                    _logger.LogInformation(
+                        "Repo '{Name}' re-cloned but unchanged (SHA: {Sha}). Skipping vector re-index.",
+                        repo.Name, newSha);
+                    // GitNexus index is ephemeral; always rebuild it
+                    await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
+                    await _registry.UpdateLastShaAsync(repo.Name, newSha);
+                }
+                else
+                {
+                    // First sync or no cached vectors: full index
+                    await _indexingService.IndexRepoAsync(repo.Name, cancellationToken);
+                    await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
+                    await _registry.UpdateLastShaAsync(repo.Name, newSha);
+                }
             }
             else if (oldSha != newSha)
             {

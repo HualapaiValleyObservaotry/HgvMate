@@ -44,6 +44,9 @@ public class IndexingService
     /// <summary>Persists pending vector store changes to disk.</summary>
     public Task SaveVectorStoreAsync() => _vectorStore.SaveAsync();
 
+    /// <summary>Returns true if the vector cache already contains chunks for the given repo.</summary>
+    public bool HasVectorsForRepo(string repoName) => _vectorStore.HasChunksForRepo(repoName);
+
     public virtual async Task<IndexResult> IndexRepoAsync(string repoName, CancellationToken cancellationToken = default)
     {
         using var activity = HgvMateDiagnostics.ActivitySource.StartActivity("IndexRepo");
