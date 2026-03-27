@@ -160,4 +160,40 @@ public sealed class OnnxEmbedderTests
         // In CI/test environment without GPU, should fall back to CPU
         Assert.AreEqual("CPU", providerName);
     }
+
+    // ─── CPU feature detection tests ─────────────────────────────────────────
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void DetectCpuFeatures_ReturnsNonEmptyList()
+    {
+        var features = OnnxEmbedder.DetectCpuFeatures();
+        Assert.IsNotEmpty(features);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void DetectCpuFeatures_ContainsOnlyKnownFlags()
+    {
+        var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "sse4_1", "sse4_2", "avx", "avx2", "avx512f", "avx512bw", "avx512vl",
+            "avx512_vnni", "avx_vnni", "avx512vbmi", "amx_int8", "amx_bf16", "fma", "f16c",
+            "neon", "dotprod"
+        };
+        var features = OnnxEmbedder.DetectCpuFeatures();
+        foreach (var f in features)
+        {
+            Assert.Contains(f, known);
+        }
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CpuFeatures_Property_IsSameAsDetect()
+    {
+        var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null,
+            NullLogger<OnnxEmbedder>.Instance);
+        Assert.IsNotEmpty(embedder.CpuFeatures);
+    }
 }

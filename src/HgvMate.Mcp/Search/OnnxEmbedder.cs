@@ -15,6 +15,8 @@ public interface IOnnxEmbedder
     int ThreadCount { get; }
     int BatchSize { get; }
     string ModelType { get; }
+    string SelectedModelFile { get; }
+    IReadOnlyList<string> CpuFeatures { get; }
     Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken = default);
 }
@@ -53,6 +55,8 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
     public int ThreadCount { get; private set; }
     public int BatchSize { get; private set; }
     public string ModelType { get; private set; } = "none";
+    public string SelectedModelFile { get; private set; } = "none";
+    public IReadOnlyList<string> CpuFeatures { get; } = DetectCpuFeatures();
 
     public OnnxEmbedder(HgvMateOptions options, SearchOptions searchOptions, ILogger<OnnxEmbedder> logger)
     {
@@ -70,13 +74,14 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
 
                 ExecutionProvider = providerName;
                 ThreadCount = sessionOptions.IntraOpNumThreads;
+                SelectedModelFile = Path.GetFileName(modelPath);
                 ModelType = modelPath.Contains("qint8", StringComparison.OrdinalIgnoreCase)
                          || modelPath.Contains("quint8", StringComparison.OrdinalIgnoreCase)
                     ? "INT8-quantized" : "FP32";
 
                 _logger.LogInformation(
-                    "ONNX model loaded: provider={Provider}, model={ModelType}, threads={Threads}, cpus={Cpus}, path='{Path}'.",
-                    ExecutionProvider, ModelType, ThreadCount, Environment.ProcessorCount, modelPath);
+                    "ONNX model loaded: provider={Provider}, model={ModelType}, file={FileName}, threads={Threads}, cpus={Cpus}, cpuFeatures=[{CpuFeatures}], path='{Path}'.",
+                    ExecutionProvider, ModelType, ModelFileName, ThreadCount, Environment.ProcessorCount, string.Join(", ", CpuFeatures), modelPath);
 
                 // Publish to shared telemetry gauges
                 HgvMateDiagnostics.SetOnnxProvider(ExecutionProvider);
@@ -188,6 +193,54 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
             // CoreML not available
             return false;
         }
+    }
+
+    /// <summary>
+    /// Detects CPU instruction set features relevant to ONNX Runtime performance.
+    /// On Linux, reads /proc/cpuinfo flags. On other platforms, uses .NET intrinsics probes.
+    /// </summary>
+    internal static IReadOnlyList<string> DetectCpuFeatures()
+    {
+        var features = new List<string>();
+
+        if (OperatingSystem.IsLinux())
+        {
+            // /proc/cpuinfo is the most reliable source on Linux (works inside containers too)
+            try
+            {
+                var cpuinfo = File.ReadAllText("/proc/cpuinfo");
+                var flagsLine = cpuinfo.Split('\n').FirstOrDefault(l => l.StartsWith("flags", StringComparison.OrdinalIgnoreCase));
+                if (flagsLine != null)
+                {
+                    var flags = flagsLine.Split(':').ElementAtOrDefault(1)?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [];
+                    var relevant = new[] { "sse4_1", "sse4_2", "avx", "avx2", "avx512f", "avx512bw", "avx512vl", "avx512_vnni", "avx_vnni", "amx_int8", "amx_bf16", "fma", "f16c" };
+                    foreach (var flag in relevant)
+                    {
+                        if (flags.Contains(flag, StringComparer.OrdinalIgnoreCase))
+                            features.Add(flag);
+                    }
+                }
+            }
+            catch { /* /proc/cpuinfo not readable */ }
+        }
+
+        if (features.Count == 0)
+        {
+            // Fallback: .NET hardware intrinsics (works cross-platform)
+            if (System.Runtime.Intrinsics.X86.Sse41.IsSupported) features.Add("sse4_1");
+            if (System.Runtime.Intrinsics.X86.Sse42.IsSupported) features.Add("sse4_2");
+            if (System.Runtime.Intrinsics.X86.Avx.IsSupported) features.Add("avx");
+            if (System.Runtime.Intrinsics.X86.Avx2.IsSupported) features.Add("avx2");
+            if (System.Runtime.Intrinsics.X86.Avx512F.IsSupported) features.Add("avx512f");
+            if (System.Runtime.Intrinsics.X86.Avx512BW.IsSupported) features.Add("avx512bw");
+            if (System.Runtime.Intrinsics.X86.Avx512Vbmi.IsSupported) features.Add("avx512vbmi");
+            if (System.Runtime.Intrinsics.X86.AvxVnni.IsSupported) features.Add("avx_vnni");
+            if (System.Runtime.Intrinsics.X86.Fma.IsSupported) features.Add("fma");
+            if (System.Runtime.Intrinsics.Arm.AdvSimd.IsSupported) features.Add("neon");
+            if (System.Runtime.Intrinsics.Arm.Dp.IsSupported) features.Add("dotprod");
+        }
+
+        return features;
     }
 
     private string? ResolveModelPath(HgvMateOptions options)
