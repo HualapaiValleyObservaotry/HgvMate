@@ -35,6 +35,7 @@
 	"remoteEnv": {
 		"AZURE_DEVOPS_PAT": "${localEnv:AZURE_DEVOPS_PAT}",
 		"GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}",
+		"GH_PAT": "${localEnv:GH_PAT}",
 		"HGVMATE_DATA_PATH": "/workspaces/HgvMate/.data"
 	},
 	"mounts": [
