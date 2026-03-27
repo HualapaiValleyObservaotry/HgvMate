@@ -31,13 +31,23 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
 WORKDIR /app
 COPY --from=build /app .
 
-# Download INT8 quantized ONNX model (~30 MB, faster CPU inference than FP32)
-# Also download FP32 model as fallback (~80 MB)
+ENV HF_ONNX_BASE="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/"
+
+# Download architecture-specific quantized ONNX models (~23 MB each, faster CPU inference)
+# and FP32 model as fallback (~90 MB). OnnxEmbedder picks the best match at runtime.
+ARG TARGETARCH
 RUN mkdir -p /app/models && \
-    curl -fSL -o /app/models/all-MiniLM-L6-v2-quantized.onnx \
-    "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model_quantized.onnx" && \
-    curl -fSL -o /app/models/all-MiniLM-L6-v2.onnx \
-    "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx"
+    if [ "$TARGETARCH" = "arm64" ]; then \
+      curl -fSL -o /app/models/model_qint8_arm64.onnx \
+        "${HF_ONNX_BASE}model_qint8_arm64.onnx" ; \
+    else \
+      curl -fSL -o /app/models/model_quint8_avx2.onnx \
+        "${HF_ONNX_BASE}model_quint8_avx2.onnx" && \
+      curl -fSL -o /app/models/model_qint8_avx512_vnni.onnx \
+        "${HF_ONNX_BASE}model_qint8_avx512_vnni.onnx" ; \
+    fi && \
+    curl -fSL -o /app/models/model.onnx \
+      "${HF_ONNX_BASE}model.onnx"
 
 VOLUME /data
 ENV HgvMate__DataPath=/data

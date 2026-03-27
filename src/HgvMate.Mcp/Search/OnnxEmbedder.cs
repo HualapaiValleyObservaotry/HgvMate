@@ -22,12 +22,26 @@ public interface IOnnxEmbedder
 public class OnnxEmbedder : IOnnxEmbedder, IDisposable
 {
     public const int EmbeddingDimensions = 384;
-    private const string ModelFileName = "all-MiniLM-L6-v2.onnx";
-    private const string QuantizedModelFileName = "all-MiniLM-L6-v2-quantized.onnx";
-    private const string ModelDownloadUrl =
-        "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx";
-    private const string QuantizedModelDownloadUrl =
-        "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model_quantized.onnx";
+    private const string ModelFileName = "model.onnx";
+    private const string HuggingFaceOnnxBase =
+        "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/";
+
+    // Architecture-specific quantized models from HuggingFace (INT8, ~23 MB each).
+    // Ordered by preference: best-match first, broadest-compat last.
+    private static readonly string[] QuantizedModelFileNames = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
+    {
+        System.Runtime.InteropServices.Architecture.Arm64 => ["model_qint8_arm64.onnx"],
+        _ => ["model_qint8_avx512_vnni.onnx", "model_qint8_avx512.onnx", "model_quint8_avx2.onnx"]
+    };
+
+    // For auto-download: pick the broadest-compat quantized model per architecture.
+    private static readonly (string FileName, string Url) DefaultQuantizedDownload = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
+    {
+        System.Runtime.InteropServices.Architecture.Arm64 =>
+            ("model_qint8_arm64.onnx", HuggingFaceOnnxBase + "model_qint8_arm64.onnx"),
+        _ =>
+            ("model_quint8_avx2.onnx", HuggingFaceOnnxBase + "model_quint8_avx2.onnx")
+    };
 
     private readonly ILogger<OnnxEmbedder> _logger;
     private InferenceSession? _session;
@@ -56,7 +70,8 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
 
                 ExecutionProvider = providerName;
                 ThreadCount = sessionOptions.IntraOpNumThreads;
-                ModelType = modelPath.Contains("quantized", StringComparison.OrdinalIgnoreCase)
+                ModelType = modelPath.Contains("qint8", StringComparison.OrdinalIgnoreCase)
+                         || modelPath.Contains("quint8", StringComparison.OrdinalIgnoreCase)
                     ? "INT8-quantized" : "FP32";
 
                 _logger.LogInformation(
@@ -177,8 +192,9 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
 
     private string? ResolveModelPath(HgvMateOptions options)
     {
-        // Prefer quantized INT8 model for faster CPU inference
-        foreach (var fileName in new[] { QuantizedModelFileName, ModelFileName })
+        // Prefer architecture-specific quantized INT8 models, then FP32 fallback
+        var candidates = QuantizedModelFileNames.Append(ModelFileName);
+        foreach (var fileName in candidates)
         {
             // 1. Check next to app binary
             var appPath = Path.Combine(AppContext.BaseDirectory, "models", fileName);
@@ -189,9 +205,10 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
             if (File.Exists(dataPath)) return dataPath;
         }
 
-        // 3. Auto-download quantized model to data path (smaller + faster on CPU)
-        var downloadPath = Path.Combine(options.DataPath, "models", QuantizedModelFileName);
-        _logger.LogInformation("ONNX model not found locally. Downloading quantized model from Hugging Face...");
+        // 3. Auto-download broadest-compat quantized model to data path
+        var (downloadName, downloadUrl) = DefaultQuantizedDownload;
+        var downloadPath = Path.Combine(options.DataPath, "models", downloadName);
+        _logger.LogInformation("ONNX model not found locally. Downloading {Model} from Hugging Face...", downloadName);
         try
         {
             var modelsDir = Path.GetDirectoryName(downloadPath)!;
@@ -201,7 +218,7 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
             httpClient.Timeout = TimeSpan.FromMinutes(10);
 
             var tempPath = downloadPath + ".download";
-            using (var response = httpClient.GetAsync(QuantizedModelDownloadUrl, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
+            using (var response = httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
             {
                 response.EnsureSuccessStatusCode();
                 using var stream = response.Content.ReadAsStream();
