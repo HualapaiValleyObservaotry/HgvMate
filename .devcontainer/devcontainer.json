@@ -61,6 +61,7 @@
 		}
 	},
 	"postCreateCommand": "bash .devcontainer/post-create.sh",
+	"postAttachCommand": "bash .devcontainer/post-attach.sh",
 	"remoteEnv": {
 		"AZURE_DEVOPS_PAT": "${localEnv:AZURE_DEVOPS_PAT}",
 		"HGVMATE_DATA_PATH": "/workspaces/HgvMate/.data",
