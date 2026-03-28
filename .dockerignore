@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+**/data/
+.data/
+**/.data/
+.git/
+.env
+*.db
+*.db-shm
+*.db-wal
+nohup.out

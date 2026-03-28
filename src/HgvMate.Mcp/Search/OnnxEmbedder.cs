@@ -102,7 +102,7 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
     /// <summary>
     /// Creates optimized SessionOptions with auto-detected thread count and execution providers.
     /// Thread count: if OnnxThreadCount is 0 (auto), uses half of available CPUs (clamped 1-16).
-    /// Execution providers: tries CUDA → OpenVINO → CoreML → CPU based on platform and hardware.
+    /// Execution providers: tries CUDA → OpenVINO → CPU based on platform and hardware.
     /// </summary>
     internal static (OrtSessionOptions Options, string ProviderName) CreateSessionOptions(SearchOptions searchOptions, ILogger? logger = null)
     {
@@ -132,13 +132,12 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
 
     internal static string TryAppendBestExecutionProvider(OrtSessionOptions options, ILogger? logger)
     {
-        // Priority: CUDA (NVIDIA GPU) → OpenVINO (Intel CPU/iGPU) → CoreML (Apple Silicon) → CPU (default)
-        // Each provider is tried and silently skipped if native libs are not available.
-        // The CPU execution provider is always present as fallback.
+        // Priority: CUDA (NVIDIA GPU) → OpenVINO (Intel CPU/iGPU) → CPU (default)
+        // CoreML was tested on Apple Silicon and found to be slower than CPU-only
+        // for small models (MiniLM-L6-v2), while burning ~300% CPU at idle.
 
         if (TryAppendCuda(options, logger)) return "CUDA";
         if (TryAppendOpenVino(options, logger)) return "OpenVINO";
-        if (TryAppendCoreML(options, logger)) return "CoreML";
 
         logger?.LogInformation("ONNX using CPU execution provider.");
         return "CPU";
@@ -174,23 +173,6 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
         catch (Exception)
         {
             // OpenVINO not available — package not installed or wrong platform
-            return false;
-        }
-    }
-
-    private static bool TryAppendCoreML(OrtSessionOptions options, ILogger? logger)
-    {
-        if (!OperatingSystem.IsMacOS()) return false;
-
-        try
-        {
-            options.AppendExecutionProvider_CoreML();
-            logger?.LogInformation("ONNX CoreML execution provider enabled (Apple Silicon).");
-            return true;
-        }
-        catch (Exception)
-        {
-            // CoreML not available
             return false;
         }
     }

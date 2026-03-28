@@ -23,6 +23,7 @@ public sealed class LiveOnnxTests
         Path.Combine(Path.GetTempPath(), "hgvmate-test-data");
 
     private OnnxEmbedder? _embedder;
+    private bool _autoDownloaded;
 
     [TestInitialize]
     public void Setup()
@@ -34,6 +35,7 @@ public sealed class LiveOnnxTests
 
         if (autoDownload)
         {
+            _autoDownloaded = true;
             // Use OnnxEmbedder's built-in auto-download mechanism
             var options = new HgvMateOptions { DataPath = TestDataPath };
             _embedder = new OnnxEmbedder(options, new SearchOptions(), NullLogger<OnnxEmbedder>.Instance);
@@ -57,6 +59,9 @@ public sealed class LiveOnnxTests
     public void Cleanup()
     {
         _embedder?.Dispose();
+
+        if (_autoDownloaded && Directory.Exists(TestDataPath))
+            Directory.Delete(TestDataPath, recursive: true);
     }
 
     [TestMethod]
