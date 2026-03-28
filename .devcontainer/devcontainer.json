@@ -16,6 +16,13 @@
 		"ghcr.io/devcontainers/features/docker-in-docker:2": {},
 		"ghcr.io/devcontainers/features/github-cli:1": {},
 		"ghcr.io/devcontainers/features/azure-cli:1": {},
+		"ghcr.io/devcontainers/features/common-utils:2": {
+			"installZsh": true,
+			"installOhMyZsh": true,
+			"configureZshAsDefaultShell": true,
+			"username": "vscode",
+			"upgradePackages": false
+		},
 		"ghcr.io/tailscale/codespace/tailscale:1": {}
 	},
 	"customizations": {
@@ -29,12 +36,27 @@
 			"extensions": [
 				"ms-dotnettools.csdevkit",
 				"ms-dotnettools.csharp",
+				"ms-dotnettools.vscode-dotnet-runtime",
 				"ms-azuretools.vscode-docker",
 				"GitHub.copilot",
-				"GitHub.copilot-chat"
+				"GitHub.copilot-chat",
+				"github.vscode-github-actions"
 			],
 			"settings": {
-				"dotnet.defaultSolution": "HgvMate.slnx"
+				"dotnet.defaultSolution": "HgvMate.slnx",
+				"dotnet.completion.showCompletionItemsFromUnimportedNamespaces": true,
+				"csharp.semanticHighlighting.enabled": true,
+				"editor.formatOnSave": true,
+				"editor.formatOnType": true,
+				"editor.codeActionsOnSave": {
+					"source.fixAll": "explicit",
+					"source.organizeImports": "explicit"
+				},
+				"terminal.integrated.defaultProfile.linux": "zsh",
+				"terminal.integrated.profiles.linux": {
+					"zsh": { "path": "/bin/zsh" },
+					"bash": { "path": "/bin/bash" }
+				}
 			}
 		}
 	},
