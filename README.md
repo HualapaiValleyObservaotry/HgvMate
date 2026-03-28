@@ -258,7 +258,7 @@ docker compose -f docker-compose.proxmox.yml up -d
 
 ### Mac-Specific Notes
 
-- **Apple Silicon (M1/M2/M3/M4):** Use the default `cpu` image. Docker Desktop runs it via linux/arm64. ONNX models auto-select the ARM-optimized INT8 variant.
+- **Apple Silicon (M1/M2/M3/M4):** Use the default `cpu` image. Docker Desktop runs it via linux/arm64. ONNX models auto-select the ARM-optimized INT8 variant. CoreML is **not** used — testing showed CPU-only inference is faster and avoids ~300% idle CPU overhead.
 - **Intel Mac:** Use the default `cpu` image. The `openvino` image also works but the OpenVINO EP benefit on older Intel Mac CPUs is marginal.
 - Docker Desktop resource limits apply. Allocate at least 2 GB RAM and 2 CPUs in Docker Desktop → Settings → Resources.
 

@@ -160,7 +160,7 @@ public sealed class OnnxEmbedderTests
         // Provider should be one of the known execution providers, depending on environment
         var allowedProviders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "CPU", "CUDA", "DML", "OpenVINO", "CoreML"
+            "CPU", "CUDA", "DML", "OpenVINO"
         };
         Assert.Contains(providerName, allowedProviders,
             $"Unexpected provider name '{providerName}'.");
