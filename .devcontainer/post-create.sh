@@ -8,7 +8,30 @@ command_exists() {
 
 echo "Running HgvMate post-create setup..."
 
+# Private GitHub Gist ID containing the .env file.
+# Updated via: GH_TOKEN="$GITHUB_TOKEN" gh gist edit <id> /workspaces/HgvMate/.env
+HGVMATE_ENV_GIST="1f014918502877f0c37738fa733dad65"
+
 # Source .env for non-secret config (hostnames, usernames) if not already in environment
+if [ ! -f /workspaces/HgvMate/.env ] && [ -z "${CODESPACES:-}" ]; then
+	# Local devcontainer without .env — try to fetch from private gist
+	echo "No .env file found. Attempting to fetch from GitHub Gist..."
+	# Use GITHUB_TOKEN (provided by VS Code) or GH_TOKEN for auth
+	GIST_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+	if [ -n "$GIST_TOKEN" ] && [ -n "$HGVMATE_ENV_GIST" ]; then
+		if GH_TOKEN="$GIST_TOKEN" gh gist view "$HGVMATE_ENV_GIST" --raw --filename .env \
+				> /workspaces/HgvMate/.env 2>/dev/null; then
+			chmod 600 /workspaces/HgvMate/.env
+			echo "✅ Fetched .env from GitHub Gist."
+		else
+			echo "⚠  Could not fetch .env from Gist. gh may not be authenticated."
+			rm -f /workspaces/HgvMate/.env
+		fi
+	else
+		echo "⚠  No GitHub token available to fetch .env from Gist."
+	fi
+fi
+
 if [ -f /workspaces/HgvMate/.env ]; then
 	echo "Loading environment from .env..."
 	set -a
@@ -32,7 +55,7 @@ fi
 ENVBLOCK
 	fi
 elif [ -z "${CODESPACES:-}" ]; then
-	# Local devcontainer without .env — warn the user
+	# Local devcontainer without .env and gist fetch failed
 	echo ""
 	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	echo "⚠  No .env file found and this is not a GitHub Codespace."

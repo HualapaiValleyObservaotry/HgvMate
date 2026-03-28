@@ -124,9 +124,21 @@ chmod 600 "$ENV_FILE"
 
 echo ""
 echo "✅ Wrote $ENV_FILE"
-echo ""
-echo "Next steps:"
-echo "  1. Copy this file to your local clone of the repo:"
-echo "     scp <codespace>:/workspaces/HgvMate/.env /path/to/local/HgvMate/.env"
-echo "  2. Or download it via VS Code: right-click .env → Download"
-echo "  3. Rebuild your local devcontainer — all secrets will be available."
+
+# Also update the private GitHub Gist so local devcontainers can auto-fetch it
+HGVMATE_ENV_GIST="1f014918502877f0c37738fa733dad65"
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+	echo "Updating GitHub Gist..."
+	if gh gist edit "$HGVMATE_ENV_GIST" "$ENV_FILE" 2>/dev/null; then
+		echo "✅ Gist updated. Local devcontainers will auto-fetch this .env on next build."
+	else
+		echo "⚠  Could not update Gist. You may need to manually copy .env to local machines."
+	fi
+else
+	echo ""
+	echo "Next steps:"
+	echo "  1. Copy this file to your local clone of the repo:"
+	echo "     scp <codespace>:/workspaces/HgvMate/.env /path/to/local/HgvMate/.env"
+	echo "  2. Or download it via VS Code: right-click .env → Download"
+	echo "  3. Rebuild your local devcontainer — all secrets will be available."
+fi
