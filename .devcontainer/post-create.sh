@@ -18,7 +18,7 @@ _load_base_script() {
 		token=$(gh auth token 2>/dev/null) || true
 	fi
 	if [ -z "$token" ] && command -v git >/dev/null 2>&1; then
-		token=$(printf 'protocol=https\nhost=github.com\n' | git credential fill 2>/dev/null | grep '^password=' | head -1 | cut -d= -f2-) || true
+		token=$(printf 'protocol=https\nhost=github.com\n' | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null | grep '^password=' | head -1 | cut -d= -f2-) || true
 	fi
 
 	# Try gh first (works with private gists + authenticated), fall back to curl
@@ -47,7 +47,7 @@ if [ -z "${GH_TOKEN:-}" ] && [ -z "${GITHUB_TOKEN:-}" ]; then
 		_resolved_token=$(gh auth token 2>/dev/null) || true
 	fi
 	if [ -z "$_resolved_token" ] && command -v git >/dev/null 2>&1; then
-		_resolved_token=$(printf 'protocol=https\nhost=github.com\n' | git credential fill 2>/dev/null | grep '^password=' | head -1 | cut -d= -f2-) || true
+		_resolved_token=$(printf 'protocol=https\nhost=github.com\n' | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null | grep '^password=' | head -1 | cut -d= -f2-) || true
 	fi
 	if [ -n "$_resolved_token" ]; then
 		export GH_TOKEN="$_resolved_token"
