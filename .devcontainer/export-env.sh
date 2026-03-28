@@ -28,7 +28,6 @@ fi
 # Collect the variables we care about
 declare -A VARS=(
 	[AZURE_DEVOPS_PAT]="${AZURE_DEVOPS_PAT:-}"
-	[GH_PAT]="${GH_PAT:-}"
 	[PVE_HOST]="${PVE_HOST:-}"
 	[PVE_USER]="${PVE_USER:-}"
 	[PVE_TOKEN]="${PVE_TOKEN:-}"
@@ -89,15 +88,6 @@ cat > "$ENV_FILE" <<EOF
 
 # Azure DevOps PAT — used for cloning repos and accessing work items
 AZURE_DEVOPS_PAT=${VARS[AZURE_DEVOPS_PAT]}
-
-# GitHub PAT — used for cloning GitHub repos
-GH_PAT=${VARS[GH_PAT]}
-
-# GitHub token — provided by VS Code / Codespaces automatically
-GITHUB_TOKEN=
-
-# Data directory — where SQLite DBs, cloned repos, and ONNX model are stored
-HGVMATE_DATA_PATH=
 
 # Proxmox API — used for deployment to local Proxmox host
 PVE_HOST=${VARS[PVE_HOST]}
