@@ -1,3 +1,4 @@
+using HgvMate.Mcp.Configuration;
 using HgvMate.Mcp.Search;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -85,32 +86,120 @@ public sealed class OnnxEmbedderTests
     // ─── Batch embedding tests ───────────────────────────────────────────────
 
     [TestMethod]
+    [TestCategory("Unit")]
     public async Task EmbedBatchAsync_WithoutModel_ReturnsZeroVectors()
     {
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null,
             NullLogger<OnnxEmbedder>.Instance);
-        var results = await embedder.EmbedBatchAsync(["hello world", "foo bar"]);
-        Assert.HasCount(2, results);
-        Assert.IsTrue(results[0].All(static v => v == 0f));
-        Assert.IsTrue(results[1].All(static v => v == 0f));
+        var texts = new List<string> { "hello", "world", "test" };
+        var results = await embedder.EmbedBatchAsync(texts);
+
+        Assert.HasCount(3, results);
+        foreach (var result in results)
+        {
+            Assert.HasCount(384, result);
+            Assert.IsTrue(result.All(static v => v == 0f));
+        }
     }
 
     [TestMethod]
-    public async Task EmbedBatchAsync_EmptyList_ReturnsEmptyArray()
+    [TestCategory("Unit")]
+    public async Task EmbedBatchAsync_EmptyList_ReturnsEmptyList()
     {
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null,
             NullLogger<OnnxEmbedder>.Instance);
-        var results = await embedder.EmbedBatchAsync([]);
-        Assert.HasCount(0, results);
+        var results = await embedder.EmbedBatchAsync(new List<string>());
+        Assert.IsEmpty(results);
+    }
+
+    // ─── SessionOptions auto-detection tests ─────────────────────────────────
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CreateSessionOptions_AutoDetect_SetsThreadsToHalfCpus()
+    {
+        var searchOptions = new SearchOptions { OnnxThreadCount = 0 };
+        var (options, providerName) = OnnxEmbedder.CreateSessionOptions(searchOptions);
+
+        int expected = Math.Clamp(Environment.ProcessorCount / 2, 1, 16);
+        Assert.AreEqual(expected, options.IntraOpNumThreads);
+        Assert.AreEqual(1, options.InterOpNumThreads);
+        Assert.IsFalse(string.IsNullOrEmpty(providerName));
     }
 
     [TestMethod]
-    public async Task EmbedBatchAsync_SingleItem_ReturnsSingleVector()
+    [TestCategory("Unit")]
+    public void CreateSessionOptions_ExplicitThreadCount_Honored()
+    {
+        var searchOptions = new SearchOptions { OnnxThreadCount = 6 };
+        var (options, providerName) = OnnxEmbedder.CreateSessionOptions(searchOptions);
+
+        Assert.AreEqual(6, options.IntraOpNumThreads);
+        Assert.AreEqual(1, options.InterOpNumThreads);
+        Assert.IsFalse(string.IsNullOrEmpty(providerName));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CreateSessionOptions_GraphOptimization_EnabledAll()
+    {
+        var searchOptions = new SearchOptions { OnnxThreadCount = 2 };
+        var (options, _) = OnnxEmbedder.CreateSessionOptions(searchOptions);
+
+        Assert.AreEqual(Microsoft.ML.OnnxRuntime.GraphOptimizationLevel.ORT_ENABLE_ALL,
+            options.GraphOptimizationLevel);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CreateSessionOptions_ReturnsProviderName()
+    {
+        var searchOptions = new SearchOptions { OnnxThreadCount = 2 };
+        var (_, providerName) = OnnxEmbedder.CreateSessionOptions(searchOptions);
+
+        // Provider should be one of the known execution providers, depending on environment
+        var allowedProviders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "CPU", "CUDA", "DML", "OpenVINO", "CoreML"
+        };
+        Assert.Contains(providerName, allowedProviders,
+            $"Unexpected provider name '{providerName}'.");
+    }
+
+    // ─── CPU feature detection tests ─────────────────────────────────────────
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void DetectCpuFeatures_ReturnsNonEmptyList()
+    {
+        var features = OnnxEmbedder.DetectCpuFeatures();
+        Assert.IsNotEmpty(features);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void DetectCpuFeatures_ContainsOnlyKnownFlags()
+    {
+        var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "sse4_1", "sse4_2", "avx", "avx2", "avx512f", "avx512bw", "avx512vl",
+            "avx512_vnni", "avx_vnni", "avx512vbmi", "amx_int8", "amx_bf16", "fma", "f16c",
+            "neon", "dotprod"
+        };
+        var features = OnnxEmbedder.DetectCpuFeatures();
+        foreach (var f in features)
+        {
+            Assert.Contains(f, known);
+        }
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CpuFeatures_Property_IsSameAsDetect()
     {
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null,
             NullLogger<OnnxEmbedder>.Instance);
-        var results = await embedder.EmbedBatchAsync(["hello world"]);
-        Assert.HasCount(1, results);
-        Assert.HasCount(384, results[0]);
+        var expected = OnnxEmbedder.DetectCpuFeatures();
+        CollectionAssert.AreEqual(expected.ToList(), embedder.CpuFeatures.ToList());
     }
 }

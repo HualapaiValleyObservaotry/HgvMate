@@ -57,17 +57,17 @@ The included `docker-compose.yml` sets recommended resource limits (2 vCPU, 2 GB
 
 | Resource | Baseline (up to 20 repos) | Scaled (30+ repos) |
 |----------|--------------------------|---------------------|
-| **CPU** | 2 vCPUs | 4 vCPUs |
-| **Memory** | 2 GB | 4 GB |
+| **CPU** | 2 vCPUs | 4+ vCPUs |
+| **Memory** | 4 GB | 6 GB |
 | **Data volume** | 20 GB | 40 GB+ |
 
-Resource limits **cannot** be set in the Dockerfile — they are applied at deployment time via `docker run` flags, `docker-compose.yml`, or your orchestrator (Kubernetes, ACA, etc.).
+Resource limits **cannot** be set in the Dockerfile — they are applied at deployment time via `docker run` flags, `docker-compose.yml`, or your orchestrator (Kubernetes, Proxmox, etc.).
 
 **With `docker run`:**
 
 ```bash
 docker run -d \
-  --cpus=2 --memory=2g \
+  --cpus=2 --memory=4g \
   -e HGVMATE_TRANSPORT=sse \
   -p 5000:5000 \
   -v hgvmate-data:/data \
@@ -178,4 +178,162 @@ dotnet test --filter "FullyQualifiedName!~DockerTests&FullyQualifiedName!~LiveOn
 - ONNX Runtime (all-MiniLM-L6-v2 local embeddings)
 - OpenAPI + Scalar (API documentation)
 - MSTest 4.x
-- Docker (Alpine multi-stage build)
+- Docker (Ubuntu multi-stage build)
+
+## Deployment
+
+### Container Image Variants
+
+The Dockerfile supports a build argument `ONNX_PROVIDER` that controls which ONNX Runtime execution provider is used:
+
+| `ONNX_PROVIDER` | Platforms | Use Case |
+|-----------------|-----------|----------|
+| `cpu` (default) | linux/amd64, linux/arm64 | **Universal** — works everywhere including Mac (Docker Desktop), Windows (WSL2), cloud VMs, any Linux host |
+| `openvino` | linux/amd64 only | **Intel-optimized** — uses OpenVINO EP for accelerated inference on Intel CPUs. Best for dedicated Intel servers (e.g., Proxmox LXC with i9) |
+
+**Building each variant:**
+
+```bash
+# Universal CPU image (default) — runs on Mac, Windows, Linux, ARM, x86
+docker build -t hgvmate .
+
+# Intel OpenVINO image — Intel x86-64 servers only
+docker build --build-arg ONNX_PROVIDER=openvino -t hgvmate:openvino .
+```
+
+**Pre-built images on GHCR (pushed by CI on every merge to main):**
+
+| Tag | Description |
+|-----|-------------|
+| `ghcr.io/roysalisbury/hgvmate:latest` | Universal CPU image |
+| `ghcr.io/roysalisbury/hgvmate:cpu` | Same as `latest` (explicit alias) |
+| `ghcr.io/roysalisbury/hgvmate:openvino` | Intel OpenVINO-optimized (x86-64 only) |
+| `ghcr.io/roysalisbury/hgvmate:<sha>` | Specific commit (CPU) |
+| `ghcr.io/roysalisbury/hgvmate:<sha>-openvino` | Specific commit (OpenVINO) |
+
+**Pulling from Portainer or CLI:**
+
+```bash
+# On any machine (Mac, Proxmox, cloud VM):
+docker pull ghcr.io/roysalisbury/hgvmate:latest
+
+# On Intel servers (Proxmox, bare metal):
+docker pull ghcr.io/roysalisbury/hgvmate:openvino
+```
+
+### Running on Any Machine
+
+```bash
+# Quick start — Docker auto-creates the named volume on first run
+docker run -d \
+  --name hgvmate \
+  -e HGVMATE_TRANSPORT=sse \
+  -p 5000:5000 \
+  -v hgvmate-data:/data \
+  ghcr.io/roysalisbury/hgvmate:latest
+```
+
+The `-v hgvmate-data:/data` syntax creates a **named volume** automatically if it doesn't exist. Docker manages its location; data persists across container restarts and upgrades. No need to `mkdir` anything.
+
+For bind mounts (explicit host path), the directory must exist:
+
+```bash
+# Bind mount — you manage the directory, useful for backups
+mkdir -p ~/hgvmate-data
+docker run -d -e HGVMATE_TRANSPORT=sse -p 5000:5000 \
+  -v ~/hgvmate-data:/data ghcr.io/roysalisbury/hgvmate:latest
+```
+
+### Docker Compose (recommended)
+
+```bash
+docker compose up -d        # uses docker-compose.yml (general purpose)
+```
+
+For Proxmox or dedicated Intel servers:
+
+```bash
+docker compose -f docker-compose.proxmox.yml up -d
+```
+
+### Mac-Specific Notes
+
+- **Apple Silicon (M1/M2/M3/M4):** Use the default `cpu` image. Docker Desktop runs it via linux/arm64. ONNX models auto-select the ARM-optimized INT8 variant.
+- **Intel Mac:** Use the default `cpu` image. The `openvino` image also works but the OpenVINO EP benefit on older Intel Mac CPUs is marginal.
+- Docker Desktop resource limits apply. Allocate at least 2 GB RAM and 2 CPUs in Docker Desktop → Settings → Resources.
+
+### Platform Compatibility Matrix
+
+| Host | Architecture | `cpu` image | `openvino` image |
+|------|-------------|-------------|------------------|
+| Mac (Apple Silicon) | arm64 | ✅ | ❌ (x86-64 only) |
+| Mac (Intel) | amd64 | ✅ | ✅ (marginal benefit) |
+| Windows (WSL2) | amd64 | ✅ | ✅ (if Intel CPU) |
+| Linux (Intel/AMD) | amd64 | ✅ | ✅ (Intel CPUs only) |
+| Linux (ARM server) | arm64 | ✅ | ❌ (x86-64 only) |
+| Proxmox LXC (Intel) | amd64 | ✅ | ✅ **recommended** |
+
+## OpenVINO Native Libraries
+
+The OpenVINO execution provider requires native `.so` libraries extracted from Intel's pre-built Python wheel. These are stored as a **GitHub Release artifact** so that Docker builds and CI can download them without PyPI access.
+
+### Current Version
+
+| Component | Version |
+|-----------|---------|
+| ONNX Runtime | 1.24.1 |
+| OpenVINO | 2025.4.1 |
+| Release tag | `openvino-libs/v1.24.1` |
+| Tarball | `linux-x64.tar.gz` (~62 MB compressed, ~191 MB extracted) |
+
+### How to Update OpenVINO Libraries
+
+When a new version of `onnxruntime-openvino` is released on PyPI:
+
+**1. Extract new native libs:**
+
+```bash
+# Update the version number as needed
+./tools/extract-openvino-libs.sh 1.25.0
+```
+
+This downloads the Python wheel, extracts only the CPU-essential `.so` files (no GPU/NPU/Python bindings), and creates a compressed tarball at `libs/openvino/linux-x64.tar.gz`.
+
+**2. Upload to GitHub Releases:**
+
+```bash
+# For a new version:
+gh release create openvino-libs/v1.25.0 \
+  libs/openvino/linux-x64.tar.gz \
+  --title "OpenVINO native libs v1.25.0 (Linux x64)" \
+  --notes "Source: onnxruntime-openvino==1.25.0 from PyPI"
+
+# Or update an existing release:
+gh release upload openvino-libs/v1.25.0 \
+  libs/openvino/linux-x64.tar.gz --clobber
+```
+
+**3. Update version references:**
+
+- `Dockerfile` → `OPENVINO_LIBS_TAG` default value and `onnxruntime.dll` symlink version
+- `src/HgvMate.Mcp/HgvMate.Mcp.csproj` → `Microsoft.ML.OnnxRuntime.Managed` version (must match ORT version in the wheel)
+- `libs/openvino/manifest.json` → auto-updated by the extract script
+
+**4. Rebuild and test:**
+
+```bash
+docker build --build-arg ONNX_PROVIDER=openvino -t hgvmate:openvino .
+# Check logs for "provider=OpenVINO"
+```
+
+### Why This Approach
+
+The `.so` files are **userspace libraries** that link against glibc (≥ 2.28) and standard POSIX libs — no kernel modules or kernel-specific headers. They do NOT need to be rebuilt when:
+- Kernel version changes
+- Docker base image gets minor updates
+- .NET SDK version changes
+- Application code changes
+
+They only need updating when:
+- ONNX Runtime or OpenVINO releases a new version (new features, perf improvements, bug fixes)
+- Switching CPU architecture (but OpenVINO is x86-64 only anyway)

@@ -8,6 +8,15 @@ command_exists() {
 
 echo "Running HgvMate post-create setup..."
 
+# Source .env for non-secret config (hostnames, usernames) if not already in environment
+if [ -f /workspaces/HgvMate/.env ]; then
+	echo "Loading environment from .env..."
+	set -a
+	# shellcheck disable=SC1091
+	source /workspaces/HgvMate/.env
+	set +a
+fi
+
 # Fix .dotnet directory ownership
 echo "Fixing .dotnet directory ownership..."
 sudo chown -R vscode:vscode /home/vscode/.dotnet || true
@@ -66,6 +75,48 @@ if [ -z "$SSH_AUTH_SOCK" ]; then
 else
 	echo "Using existing SSH agent at $SSH_AUTH_SOCK"
 fi
+
+# Restore SSH key from Codespace secret (survives rebuilds)
+if [ -n "${SSH_PRIVATE_KEY:-}" ] && [ ! -f /home/vscode/.ssh/id_ed25519 ]; then
+	echo "Restoring SSH key from Codespace secret..."
+	mkdir -p /home/vscode/.ssh
+	echo "$SSH_PRIVATE_KEY" > /home/vscode/.ssh/id_ed25519
+	chmod 600 /home/vscode/.ssh/id_ed25519
+	ssh-keygen -y -f /home/vscode/.ssh/id_ed25519 > /home/vscode/.ssh/id_ed25519.pub
+	chmod 644 /home/vscode/.ssh/id_ed25519.pub
+	echo "SSH key restored."
+fi
+
+# Create Docker contexts for remote hosts (survives rebuilds)
+echo "Setting up Docker contexts for remote hosts..."
+create_docker_context() {
+	local name="$1" user="$2" host="$3"
+	if [ -z "$host" ]; then
+		echo "  Skipping ${name}: host not set"
+		return
+	fi
+	local endpoint="ssh://${user}@${host}"
+	# Remove stale context if it exists, then recreate
+	docker context rm "$name" --force >/dev/null 2>&1 || true
+	docker context create "$name" --docker "host=${endpoint}" >/dev/null 2>&1
+	echo "  Created context '${name}' -> ${endpoint}"
+}
+
+create_docker_context "mac" "${MAC_USER:-roys}" "${MAC_HOST:-}"
+create_docker_context "lxc" "${LXC_USER:-root}" "${LXC_HOST:-}"
+create_docker_context "proxmox" "${PVE_USER:-root}" "${PVE_HOST:-}"
+
+# Add remote hosts to SSH known_hosts (avoids interactive prompt)
+echo "Scanning SSH host keys for remote hosts..."
+mkdir -p /home/vscode/.ssh
+touch /home/vscode/.ssh/known_hosts
+for host in ${MAC_HOST:-} ${LXC_HOST:-} ${PVE_HOST:-}; do
+	if [ -n "$host" ] && ! grep -q "^${host}" /home/vscode/.ssh/known_hosts 2>/dev/null; then
+		ssh-keyscan -H "$host" >> /home/vscode/.ssh/known_hosts 2>/dev/null && \
+			echo "  Added host key for ${host}" || \
+			echo "  Warning: could not scan host key for ${host} (host may be offline)"
+	fi
+done
 
 # Try to load SSH keys if available
 if compgen -G "/home/vscode/.ssh/id_*" >/dev/null 2>&1; then

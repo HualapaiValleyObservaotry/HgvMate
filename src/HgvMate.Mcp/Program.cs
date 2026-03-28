@@ -166,7 +166,7 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
     var telemetrySection = configuration.GetSection("Telemetry");
     var serviceName = telemetrySection["ServiceName"] ?? "HgvMate";
     var serviceVersion = telemetrySection["ServiceVersion"] ?? "1.0.0";
-    // Support Aspire / Azure Container Apps: OTEL_EXPORTER_OTLP_ENDPOINT is injected automatically
+    // OTEL_EXPORTER_OTLP_ENDPOINT is auto-detected from environment (e.g. Aspire Dashboard sidecar)
     var otlpEndpoint = telemetrySection["OtlpEndpoint"]
         ?? Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
     if (!string.IsNullOrEmpty(otlpEndpoint))

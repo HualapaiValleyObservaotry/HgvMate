@@ -5,26 +5,44 @@
 # Prerequisites:
 #   mkdir -p /opt/hgvmate/data
 #
+# Image tags:
+#   ghcr.io/roysalisbury/hgvmate:latest   — universal CPU image
+#   ghcr.io/roysalisbury/hgvmate:openvino — Intel-optimized (recommended for Proxmox)
+#
 # Dashboard UI: http://<proxmox-ip>:18888
 # MCP endpoint:  http://<proxmox-ip>:5000/mcp
 
 services:
   hgvmate:
-    image: ghcr.io/roysalisbury/hgvmate:latest
+    image: ghcr.io/roysalisbury/hgvmate:openvino
     container_name: hgvmate-mcp
-    env_file: .env
     environment:
       - HGVMATE_TRANSPORT=sse
       # Relative path = resolves under /data → persistent NVMe storage
       # Clones survive container restarts/upgrades (no re-clone needed)
       - RepoSync__ClonePath=repos
       - RepoSync__MinFreeDiskSpaceMb=2048
+      # ONNX thread control — 0=auto-detect (half of available CPUs)
+      - Search__OnnxThreadCount=0
+      - Search__OnnxBatchSize=32
       # Telemetry → Aspire Dashboard sidecar
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://aspire-dashboard:18889
+      # Credentials (set these or use a .env file)
+      # - GITHUB_TOKEN=
+      # - AZURE_DEVOPS_PAT=
+    env_file: .env
     ports:
       - "5000:5000"
     volumes:
       - /opt/hgvmate/data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: "8.0"
+          memory: 6g
+        reservations:
+          cpus: "2.0"
+          memory: 1g
     depends_on:
       - aspire-dashboard
     restart: unless-stopped

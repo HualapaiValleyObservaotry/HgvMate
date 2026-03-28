@@ -45,6 +45,8 @@ internal static class HgvMateDiagnostics
     // ── Gauges (via ObservableGauge) ────────────────────────────────────
     private static long _activeRepoCount;
     private static long _totalChunkCount;
+    private static string _onnxProvider = "none";
+    private static int _onnxThreadCount;
 
     public static readonly ObservableGauge<long> ActiveRepos = Meter.CreateObservableGauge(
         "hgvmate.repos.active", () => Interlocked.Read(ref _activeRepoCount),
@@ -53,6 +55,20 @@ internal static class HgvMateDiagnostics
     public static readonly ObservableGauge<long> VectorChunks = Meter.CreateObservableGauge(
         "hgvmate.index.chunks.current", () => Interlocked.Read(ref _totalChunkCount),
         description: "Current number of vector chunks in store");
+
+    public static readonly ObservableGauge<int> OnnxThreads = Meter.CreateObservableGauge(
+        "hgvmate.onnx.threads", () => _onnxThreadCount,
+        description: "ONNX inference thread count");
+
+    // Histograms for ONNX inference
+    public static readonly Histogram<double> OnnxInferenceDuration = Meter.CreateHistogram<double>(
+        "hgvmate.onnx.inference.duration", unit: "ms", description: "ONNX single inference duration");
+
+    public static readonly Histogram<double> OnnxBatchDuration = Meter.CreateHistogram<double>(
+        "hgvmate.onnx.batch.duration", unit: "ms", description: "ONNX batch inference duration");
+
+    public static readonly Counter<long> OnnxInferenceTotal = Meter.CreateCounter<long>(
+        "hgvmate.onnx.inference.total", description: "Total ONNX inference calls (single + batch)");
 
     public static void RecordToolCall(string toolName)
     {
@@ -65,6 +81,14 @@ internal static class HgvMateDiagnostics
 
     public static void SetVectorChunkCount(long count) =>
         Interlocked.Exchange(ref _totalChunkCount, count);
+
+    public static void SetOnnxProvider(string provider) =>
+        _onnxProvider = provider;
+
+    public static string GetOnnxProvider() => _onnxProvider;
+
+    public static void SetOnnxThreadCount(int count) =>
+        _onnxThreadCount = count;
 
     // ── Disk space (data path) ──────────────────────────────────────────
     private static string? _dataPath;

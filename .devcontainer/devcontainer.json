@@ -16,6 +16,12 @@
 		"ghcr.io/tailscale/codespace/tailscale:1": {}
 	},
 	"customizations": {
+		"codespaces": {
+			"permissions": {
+				"packages": "write",
+				"actions": "write"
+			}
+		},
 		"vscode": {
 			"extensions": [
 				"ms-dotnettools.csdevkit",
@@ -33,10 +39,17 @@
 	"remoteEnv": {
 		"AZURE_DEVOPS_PAT": "${localEnv:AZURE_DEVOPS_PAT}",
 		"GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}",
+		"GH_PAT": "${localEnv:GH_PAT}",
 		"HGVMATE_DATA_PATH": "/workspaces/HgvMate/.data",
 		"TAILSCALE_AUTHKEY": "${localEnv:TAILSCALE_AUTHKEY}",
 		"PVE_TOKEN": "${localEnv:PVE_TOKEN}",
-		"PVE_HOST": "${localEnv:PVE_HOST}"
+		"PVE_HOST": "${localEnv:PVE_HOST}",
+		"PVE_USER": "${localEnv:PVE_USER}",
+		"SSH_PRIVATE_KEY": "${localEnv:SSH_PRIVATE_KEY}",
+		"MAC_HOST": "${localEnv:MAC_HOST}",
+		"MAC_USER": "${localEnv:MAC_USER}",
+		"LXC_HOST": "${localEnv:LXC_HOST}",
+		"LXC_USER": "${localEnv:LXC_USER}"
 	},
 	"mounts": [
 		"source=hgvmate-data,target=/workspaces/HgvMate/.data,type=volume"

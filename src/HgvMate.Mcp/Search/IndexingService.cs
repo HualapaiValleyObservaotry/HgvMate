@@ -69,11 +69,10 @@ public class IndexingService
 
         _vectorStore.DeleteChunksForRepo(repoName);
 
-        // Phase 1: Read all files and create chunk metadata
         var files = GetIndexableFiles(repoRoot);
-        int fileCount = 0, skippedCount = 0;
+        int fileCount = 0, chunkCount = 0, skippedCount = 0;
         var skippedFiles = new List<string>();
-        var pendingChunks = new List<(string relativePath, int chunkIndex, string text)>();
+        int batchSize = Math.Max(1, _searchOptions.OnnxBatchSize);
 
         foreach (var filePath in files)
         {
@@ -83,10 +82,22 @@ public class IndexingService
                 var relativePath = Path.GetRelativePath(repoRoot, filePath);
                 var content = await File.ReadAllTextAsync(filePath, cancellationToken);
                 var chunks = ChunkText(content);
+                var sourceChunks = new List<SourceChunk>();
 
-                for (int i = 0; i < chunks.Count; i++)
-                    pendingChunks.Add((relativePath, i, chunks[i]));
+                // Process chunks in batches for efficient ONNX inference
+                for (int batchStart = 0; batchStart < chunks.Count; batchStart += batchSize)
+                {
+                    var batch = chunks.Skip(batchStart).Take(batchSize).ToList();
+                    var embeddings = await _embedder.EmbedBatchAsync(batch, cancellationToken);
 
+                    for (int j = 0; j < batch.Count; j++)
+                    {
+                        sourceChunks.Add(new SourceChunk(repoName, relativePath, batchStart + j, batch[j], embeddings[j]));
+                        chunkCount++;
+                    }
+                }
+
+                _vectorStore.UpsertChunks(sourceChunks);
                 fileCount++;
             }
             catch (Exception ex)
@@ -95,29 +106,6 @@ public class IndexingService
                 skippedCount++;
                 skippedFiles.Add(Path.GetRelativePath(repoRoot, filePath));
             }
-        }
-
-        // Phase 2: Embed in batches
-        const int batchSize = 32;
-        int chunkCount = 0;
-
-        for (int i = 0; i < pendingChunks.Count; i += batchSize)
-        {
-            if (cancellationToken.IsCancellationRequested) break;
-
-            var batch = pendingChunks.GetRange(i, Math.Min(batchSize, pendingChunks.Count - i));
-            var texts = batch.Select(c => c.text).ToList();
-            var embeddings = await _embedder.EmbedBatchAsync(texts, cancellationToken);
-
-            var sourceChunks = new List<SourceChunk>(batch.Count);
-            for (int j = 0; j < batch.Count; j++)
-            {
-                var (relativePath, chunkIndex, text) = batch[j];
-                sourceChunks.Add(new SourceChunk(repoName, relativePath, chunkIndex, text, embeddings[j]));
-            }
-
-            _vectorStore.UpsertChunks(sourceChunks);
-            chunkCount += batch.Count;
         }
 
         await _vectorStore.SaveAsync();
@@ -156,11 +144,15 @@ public class IndexingService
         var content = await File.ReadAllTextAsync(fullPath, cancellationToken);
         var chunks = ChunkText(content);
         var sourceChunks = new List<SourceChunk>();
+        int batchSize = Math.Max(1, _searchOptions.OnnxBatchSize);
 
-        for (int i = 0; i < chunks.Count; i++)
+        for (int batchStart = 0; batchStart < chunks.Count; batchStart += batchSize)
         {
-            var embedding = await _embedder.EmbedAsync(chunks[i], cancellationToken);
-            sourceChunks.Add(new SourceChunk(repoName, relativePath, i, chunks[i], embedding));
+            var batch = chunks.Skip(batchStart).Take(batchSize).ToList();
+            var embeddings = await _embedder.EmbedBatchAsync(batch, cancellationToken);
+
+            for (int j = 0; j < batch.Count; j++)
+                sourceChunks.Add(new SourceChunk(repoName, relativePath, batchStart + j, batch[j], embeddings[j]));
         }
 
         _vectorStore.UpsertChunks(sourceChunks);
