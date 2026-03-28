@@ -44,7 +44,12 @@
 		"TAILSCALE_AUTHKEY": "${localEnv:TAILSCALE_AUTHKEY}",
 		"PVE_TOKEN": "${localEnv:PVE_TOKEN}",
 		"PVE_HOST": "${localEnv:PVE_HOST}",
-		"SSH_PRIVATE_KEY": "${localEnv:SSH_PRIVATE_KEY}"
+		"PVE_USER": "${localEnv:PVE_USER}",
+		"SSH_PRIVATE_KEY": "${localEnv:SSH_PRIVATE_KEY}",
+		"MAC_HOST": "${localEnv:MAC_HOST}",
+		"MAC_USER": "${localEnv:MAC_USER}",
+		"LXC_HOST": "${localEnv:LXC_HOST}",
+		"LXC_USER": "${localEnv:LXC_USER}"
 	},
 	"mounts": [
 		"source=hgvmate-data,target=/workspaces/HgvMate/.data,type=volume"
