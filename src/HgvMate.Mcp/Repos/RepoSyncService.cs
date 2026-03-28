@@ -19,10 +19,25 @@ public class RepoSyncService : BackgroundService
     private readonly ITelemetryService? _telemetry;
     private readonly ILogger<RepoSyncService> _logger;
 
-    // Limit concurrent syncs to prevent OOM from unbounded parallel git clones + ONNX indexing
+    // Limit concurrent single-repo syncs triggered externally (REST API, MCP tools)
     private readonly SemaphoreSlim _syncSemaphore = new(3, 3);
 
+    // Pipeline semaphores: one ONNX job at a time, one GitNexus job at a time
+    private readonly SemaphoreSlim _onnxSemaphore = new(1, 1);
+    private readonly SemaphoreSlim _nexusSemaphore = new(1, 1);
+
     private static readonly TimeSpan[] RetryDelays = [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(8)];
+
+    /// <summary>Describes what indexing a repo needs after clone/pull.</summary>
+    internal enum IndexAction { None, Full, Incremental, SkipVectors }
+
+    /// <summary>Work item produced by the clone phase, consumed by ONNX and GitNexus workers.</summary>
+    internal record SyncWorkItem(
+        RepoRecord Repo,
+        string NewSha,
+        IndexAction Action,
+        Stopwatch Timer,
+        IReadOnlyList<string>? ChangedFiles = null);
 
     public RepoSyncService(
         IRepoRegistry registry,
@@ -100,11 +115,25 @@ public class RepoSyncService : BackgroundService
         activity?.SetTag("hgvmate.repo.count", enabledRepos.Count);
         HgvMateDiagnostics.SetActiveRepoCount(enabledRepos.Count);
 
+        // Pipeline: clone sequentially, ONNX + GitNexus run in parallel queues
+        var postCloneTasks = new List<Task>();
+
         foreach (var repo in enabledRepos)
         {
             if (cancellationToken.IsCancellationRequested) break;
-            await SyncRepoAsync(repo, cancellationToken);
+
+            var workItem = await CloneAndPrepareAsync(repo, cancellationToken);
+            if (workItem == null) continue; // up-to-date or failed
+
+            // Fire off ONNX + GitNexus (each queued behind their semaphore)
+            // Don't await — start cloning the next repo immediately
+            var task = RunPostCloneAsync(workItem, cancellationToken);
+            postCloneTasks.Add(task);
         }
+
+        // Wait for all ONNX + GitNexus work to finish
+        if (postCloneTasks.Count > 0)
+            await Task.WhenAll(postCloneTasks);
     }
 
     public virtual async Task SyncRepoAsync(RepoRecord repo, CancellationToken cancellationToken = default)
@@ -120,7 +149,21 @@ public class RepoSyncService : BackgroundService
         }
     }
 
+    /// <summary>Single-repo sync: clone + parallel ONNX/GitNexus (no pipeline queuing).</summary>
     private async Task SyncRepoInternalAsync(RepoRecord repo, CancellationToken cancellationToken)
+    {
+        var workItem = await CloneAndPrepareAsync(repo, cancellationToken);
+        if (workItem == null) return; // up-to-date or failed
+
+        // Run ONNX and GitNexus in parallel for single-repo syncs
+        await RunIndexingInParallelAsync(workItem, cancellationToken);
+    }
+
+    /// <summary>
+    /// Clone/pull phase: fetch the repo, determine SHA, decide what indexing is needed.
+    /// Returns null if the repo is up-to-date, or on clone failure (error is recorded).
+    /// </summary>
+    internal virtual async Task<SyncWorkItem?> CloneAndPrepareAsync(RepoRecord repo, CancellationToken cancellationToken)
     {
         using var activity = HgvMateDiagnostics.ActivitySource.StartActivity("SyncRepo");
         activity?.SetTag("hgvmate.repo.name", repo.Name);
@@ -151,11 +194,8 @@ public class RepoSyncService : BackgroundService
             if (string.IsNullOrEmpty(newSha))
             {
                 _logger.LogWarning("Could not determine HEAD SHA for repo '{Name}'. Falling back to full re-index.", repo.Name);
-                await _indexingService.IndexRepoAsync(repo.Name, cancellationToken);
-                await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
                 await _registry.UpdateLastSyncedAsync(repo.Name, DateTime.UtcNow);
-                await _registry.ClearSyncErrorAsync(repo.Name);
-                return;
+                return new SyncWorkItem(repo, "", IndexAction.Full, sw);
             }
 
             await _registry.UpdateLastSyncedAsync(repo.Name, DateTime.UtcNow);
@@ -163,44 +203,38 @@ public class RepoSyncService : BackgroundService
 
             if (isFirstSync || string.IsNullOrEmpty(oldSha))
             {
-                // First sync: full index
-                await _indexingService.IndexRepoAsync(repo.Name, cancellationToken);
-                await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
-                await _registry.UpdateLastShaAsync(repo.Name, newSha);
+                if (isFirstSync && newSha == oldSha && _indexingService.HasVectorsForRepo(repo.Name))
+                {
+                    _logger.LogInformation(
+                        "Repo '{Name}' re-cloned but unchanged (SHA: {Sha}). Skipping vector re-index.",
+                        repo.Name, newSha);
+                    return new SyncWorkItem(repo, newSha, IndexAction.SkipVectors, sw);
+                }
+                return new SyncWorkItem(repo, newSha, IndexAction.Full, sw);
             }
             else if (oldSha != newSha)
             {
-                // Changes detected: try incremental re-index
                 var changedFiles = await GetChangedFilesAsync(clonePath, oldSha, newSha, cancellationToken);
                 if (changedFiles.Count > 0)
                 {
                     _logger.LogInformation("{Count} changed file(s) detected in '{Name}'. Re-indexing incrementally.", changedFiles.Count, repo.Name);
-                    foreach (var file in changedFiles)
-                    {
-                        if (cancellationToken.IsCancellationRequested) break;
-                        await _indexingService.IndexFileAsync(repo.Name, file, cancellationToken);
-                    }
-                    await _indexingService.SaveVectorStoreAsync();
-                    await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
+                    return new SyncWorkItem(repo, newSha, IndexAction.Incremental, sw, changedFiles);
                 }
                 else
                 {
-                    // Diff failed or returned nothing (e.g. shallow history); fall back to full re-index
                     _logger.LogInformation("Could not determine changed files for '{Name}'; falling back to full re-index.", repo.Name);
-                    await _indexingService.IndexRepoAsync(repo.Name, cancellationToken);
-                    await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
+                    return new SyncWorkItem(repo, newSha, IndexAction.Full, sw);
                 }
-                await _registry.UpdateLastShaAsync(repo.Name, newSha);
             }
             else
             {
                 _logger.LogInformation("Repo '{Name}' is up-to-date (SHA: {Sha}). Skipping re-index.", repo.Name, newSha);
+                await _registry.ClearSyncErrorAsync(repo.Name);
+                await _registry.UpdateSyncStateAsync(repo.Name, SyncStates.Synced);
+                HgvMateDiagnostics.RepoSyncTotal.Add(1, new KeyValuePair<string, object?>("repo", repo.Name), new KeyValuePair<string, object?>("status", "success"));
+                HgvMateDiagnostics.RepoSyncDuration.Record(sw.Elapsed.TotalMilliseconds, new KeyValuePair<string, object?>("repo", repo.Name));
+                return null; // up-to-date
             }
-
-            await _registry.ClearSyncErrorAsync(repo.Name);
-            _telemetry?.TrackEvent("hgvmate.repo.sync_completed");
-            HgvMateDiagnostics.RepoSyncTotal.Add(1, new KeyValuePair<string, object?>("repo", repo.Name), new KeyValuePair<string, object?>("status", "success"));
-            activity?.SetTag("hgvmate.repo.new_sha", newSha);
         }
         catch (Exception ex)
         {
@@ -208,15 +242,92 @@ public class RepoSyncService : BackgroundService
             _telemetry?.TrackEvent("hgvmate.repo.sync_failed");
             HgvMateDiagnostics.RepoSyncErrors.Add(1, new KeyValuePair<string, object?>("repo", repo.Name));
             HgvMateDiagnostics.RepoSyncTotal.Add(1, new KeyValuePair<string, object?>("repo", repo.Name), new KeyValuePair<string, object?>("status", "error"));
-            activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
             _logger.LogError(ex, "Failed to sync repo '{Name}'.", repo.Name);
             await _registry.UpdateSyncErrorAsync(repo.Name, ex.Message);
-        }
-        finally
-        {
             HgvMateDiagnostics.RepoSyncDuration.Record(sw.Elapsed.TotalMilliseconds, new KeyValuePair<string, object?>("repo", repo.Name));
-            _telemetry?.RecordMetric("hgvmate.repo.sync_duration_ms", sw.Elapsed.TotalMilliseconds);
+            return null;
         }
+    }
+
+    /// <summary>Pipeline post-clone: queues ONNX and GitNexus behind their respective semaphores.</summary>
+    private async Task RunPostCloneAsync(SyncWorkItem item, CancellationToken cancellationToken)
+    {
+        var onnxTask = Task.Run(async () =>
+        {
+            await _onnxSemaphore.WaitAsync(cancellationToken);
+            try { await RunOnnxIndexingAsync(item, cancellationToken); }
+            finally { _onnxSemaphore.Release(); }
+        }, cancellationToken);
+
+        var nexusTask = Task.Run(async () =>
+        {
+            await _nexusSemaphore.WaitAsync(cancellationToken);
+            try { await RunGitNexusAnalysisAsync(item.Repo.Name, cancellationToken); }
+            finally { _nexusSemaphore.Release(); }
+        }, cancellationToken);
+
+        try
+        {
+            await Task.WhenAll(onnxTask, nexusTask);
+            await FinalizeRepoAsync(item);
+        }
+        catch (Exception ex)
+        {
+            _telemetry?.TrackException(ex);
+            _logger.LogError(ex, "Post-clone indexing failed for repo '{Name}'.", item.Repo.Name);
+            await _registry.UpdateSyncErrorAsync(item.Repo.Name, ex.Message);
+        }
+    }
+
+    /// <summary>Direct parallel execution for single-repo syncs (no semaphore queuing).</summary>
+    private async Task RunIndexingInParallelAsync(SyncWorkItem item, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var onnxTask = RunOnnxIndexingAsync(item, cancellationToken);
+            var nexusTask = RunGitNexusAnalysisAsync(item.Repo.Name, cancellationToken);
+            await Task.WhenAll(onnxTask, nexusTask);
+            await FinalizeRepoAsync(item);
+        }
+        catch (Exception ex)
+        {
+            _telemetry?.TrackException(ex);
+            _logger.LogError(ex, "Indexing failed for repo '{Name}'.", item.Repo.Name);
+            await _registry.UpdateSyncErrorAsync(item.Repo.Name, ex.Message);
+        }
+    }
+
+    private async Task RunOnnxIndexingAsync(SyncWorkItem item, CancellationToken cancellationToken)
+    {
+        switch (item.Action)
+        {
+            case IndexAction.Full:
+                await _indexingService.IndexRepoAsync(item.Repo.Name, cancellationToken);
+                break;
+            case IndexAction.Incremental:
+                foreach (var file in item.ChangedFiles!)
+                {
+                    if (cancellationToken.IsCancellationRequested) break;
+                    await _indexingService.IndexFileAsync(item.Repo.Name, file, cancellationToken);
+                }
+                await _indexingService.SaveVectorStoreAsync();
+                break;
+            case IndexAction.SkipVectors:
+            case IndexAction.None:
+                break;
+        }
+    }
+
+    private async Task FinalizeRepoAsync(SyncWorkItem item)
+    {
+        if (!string.IsNullOrEmpty(item.NewSha))
+            await _registry.UpdateLastShaAsync(item.Repo.Name, item.NewSha);
+        await _registry.ClearSyncErrorAsync(item.Repo.Name);
+        await _registry.UpdateSyncStateAsync(item.Repo.Name, SyncStates.Synced);
+        _telemetry?.TrackEvent("hgvmate.repo.sync_completed");
+        HgvMateDiagnostics.RepoSyncTotal.Add(1, new KeyValuePair<string, object?>("repo", item.Repo.Name), new KeyValuePair<string, object?>("status", "success"));
+        HgvMateDiagnostics.RepoSyncDuration.Record(item.Timer.Elapsed.TotalMilliseconds, new KeyValuePair<string, object?>("repo", item.Repo.Name));
+        _telemetry?.RecordMetric("hgvmate.repo.sync_duration_ms", item.Timer.Elapsed.TotalMilliseconds);
     }
 
     internal async Task<IReadOnlyList<string>> GetChangedFilesAsync(

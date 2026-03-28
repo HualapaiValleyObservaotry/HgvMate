@@ -208,6 +208,10 @@ public class VectorStore
 
     public bool IsCacheLoaded => _cacheLoaded;
     public int CachedChunkCount => _cache.Count;
+
+    /// <summary>Returns true if the vector cache contains any chunks for the given repo.</summary>
+    public bool HasChunksForRepo(string repoName)
+        => _cache.Keys.Any(k => k.Repo == repoName);
     public double EstimatedCacheSizeMb => _cache.Count * 5.0 / 1024;
 
     // ── Binary serialization ────────────────────────────────────────────

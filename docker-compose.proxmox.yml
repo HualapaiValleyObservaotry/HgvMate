@@ -1,0 +1,39 @@
+# Proxmox / on-premise deployment with Aspire Dashboard
+# Usage:
+#   docker compose -f docker-compose.proxmox.yml up -d
+#
+# Prerequisites:
+#   mkdir -p /opt/hgvmate/data
+#
+# Dashboard UI: http://<proxmox-ip>:18888
+# MCP endpoint:  http://<proxmox-ip>:5000/mcp
+
+services:
+  hgvmate:
+    image: ghcr.io/roysalisbury/hgvmate:latest
+    container_name: hgvmate-mcp
+    env_file: .env
+    environment:
+      - HGVMATE_TRANSPORT=sse
+      # Relative path = resolves under /data → persistent NVMe storage
+      # Clones survive container restarts/upgrades (no re-clone needed)
+      - RepoSync__ClonePath=repos
+      - RepoSync__MinFreeDiskSpaceMb=2048
+      # Telemetry → Aspire Dashboard sidecar
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://aspire-dashboard:18889
+    ports:
+      - "5000:5000"
+    volumes:
+      - /opt/hgvmate/data:/data
+    depends_on:
+      - aspire-dashboard
+    restart: unless-stopped
+
+  aspire-dashboard:
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:latest
+    container_name: aspire-dashboard
+    environment:
+      - DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS=true
+    ports:
+      - "18888:18888"
+    restart: unless-stopped

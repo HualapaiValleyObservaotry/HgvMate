@@ -3,13 +3,17 @@
 	"build": {
 		"dockerfile": "Dockerfile"
 	},
+	"hostRequirements": {
+		"storage": "64gb"
+	},
 	"features": {
 		"ghcr.io/devcontainers/features/node:1": {
 			"version": "22"
 		},
 		"ghcr.io/devcontainers/features/docker-in-docker:2": {},
 		"ghcr.io/devcontainers/features/github-cli:1": {},
-		"ghcr.io/devcontainers/features/azure-cli:1": {}
+		"ghcr.io/devcontainers/features/azure-cli:1": {},
+		"ghcr.io/tailscale/codespace/tailscale:1": {}
 	},
 	"customizations": {
 		"vscode": {
@@ -29,7 +33,10 @@
 	"remoteEnv": {
 		"AZURE_DEVOPS_PAT": "${localEnv:AZURE_DEVOPS_PAT}",
 		"GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}",
-		"HGVMATE_DATA_PATH": "/workspaces/HgvMate/.data"
+		"HGVMATE_DATA_PATH": "/workspaces/HgvMate/.data",
+		"TAILSCALE_AUTHKEY": "${localEnv:TAILSCALE_AUTHKEY}",
+		"PVE_TOKEN": "${localEnv:PVE_TOKEN}",
+		"PVE_HOST": "${localEnv:PVE_HOST}"
 	},
 	"mounts": [
 		"source=hgvmate-data,target=/workspaces/HgvMate/.data,type=volume"

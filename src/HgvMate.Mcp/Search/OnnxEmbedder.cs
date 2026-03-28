@@ -10,6 +10,7 @@ public interface IOnnxEmbedder
     int Dimensions { get; }
     bool IsAvailable { get; }
     Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken = default);
+    Task<float[][]> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken = default);
 }
 
 public class OnnxEmbedder : IOnnxEmbedder, IDisposable
@@ -143,6 +144,69 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
         {
             _logger.LogError(ex, "Embedding failed.");
             return Task.FromResult(new float[EmbeddingDimensions]);
+        }
+    }
+
+    public Task<float[][]> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken = default)
+    {
+        if (texts.Count == 0)
+            return Task.FromResult(Array.Empty<float[]>());
+
+        if (_session == null)
+            return Task.FromResult(texts.Select(_ => new float[EmbeddingDimensions]).ToArray());
+
+        try
+        {
+            var tokenizedTexts = texts.Select(t => SimpleTokenize(t)).ToArray();
+            int batchSize = tokenizedTexts.Length;
+            int maxSeqLen = tokenizedTexts.Max(t => t.Length);
+
+            var inputIds = new DenseTensor<long>(new[] { batchSize, maxSeqLen });
+            var attentionMask = new DenseTensor<long>(new[] { batchSize, maxSeqLen });
+            var tokenTypeIds = new DenseTensor<long>(new[] { batchSize, maxSeqLen });
+
+            for (int b = 0; b < batchSize; b++)
+            {
+                var tokens = tokenizedTexts[b];
+                for (int i = 0; i < tokens.Length; i++)
+                {
+                    inputIds[b, i] = tokens[i];
+                    attentionMask[b, i] = 1;
+                }
+                // Padding positions remain 0 (default tensor value)
+            }
+
+            var inputs = new List<NamedOnnxValue>
+            {
+                NamedOnnxValue.CreateFromTensor("input_ids", inputIds),
+                NamedOnnxValue.CreateFromTensor("attention_mask", attentionMask),
+                NamedOnnxValue.CreateFromTensor("token_type_ids", tokenTypeIds)
+            };
+
+            using var results = _session.Run(inputs);
+            var output = results.First().AsTensor<float>();
+
+            var embeddings = new float[batchSize][];
+            for (int b = 0; b < batchSize; b++)
+            {
+                var embedding = new float[EmbeddingDimensions];
+                int seqLen = tokenizedTexts[b].Length;
+                for (int d = 0; d < EmbeddingDimensions; d++)
+                {
+                    float sum = 0;
+                    for (int t = 0; t < seqLen; t++)
+                        sum += output[b, t, d];
+                    embedding[d] = sum / seqLen;
+                }
+                embeddings[b] = Normalize(embedding);
+            }
+
+            return Task.FromResult(embeddings);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Batch embedding failed for {Count} texts.", texts.Count);
+            return Task.FromResult(texts.Select(_ => new float[EmbeddingDimensions]).ToArray());
         }
     }
 
