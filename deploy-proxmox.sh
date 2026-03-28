@@ -17,7 +17,7 @@
 
 set -euo pipefail
 
-HOST="${1:-${LXC_HOST:-192.168.2.104}}"
+HOST="${1:-${LXC_HOST:?Set LXC_HOST or pass host as first argument}}"
 USER="${LXC_USER:-root}"
 TAG="${2:-latest}"
 IMAGE="ghcr.io/roysalisbury/hgvmate:${TAG}"

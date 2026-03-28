@@ -84,6 +84,7 @@ ENV RepoSync__ClonePath=/tmp/hgvmate/repos
 ENV RepoSync__MinFreeDiskSpaceMb=1024
 ENV ASPNETCORE_URLS=http://+:5000
 # Repos cloned by previous containers may have different UIDs on the /data volume
-RUN git config --global --add safe.directory '*'
+RUN git config --global --add safe.directory /data && \
+    git config --global --add safe.directory /tmp/hgvmate/repos
 ENTRYPOINT ["/app/HgvMate.Mcp"]
 

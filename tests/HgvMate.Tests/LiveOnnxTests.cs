@@ -128,18 +128,24 @@ public sealed class LiveOnnxTests
 
     private static string? FindModelPath()
     {
-        var candidates = new[]
+        // Search for quantized and FP32 model filenames used by OnnxEmbedder
+        var modelNames = new[] { "model_qint8_arm64.onnx", "model_qint8_avx512_vnni.onnx", "model_quint8_avx2.onnx", "model.onnx" };
+        var directories = new[]
         {
-            // In data path (auto-downloaded)
-            Path.Combine(AppContext.BaseDirectory, "data", "models", "all-MiniLM-L6-v2.onnx"),
-            // Next to app binary (Docker baked)
-            Path.Combine(AppContext.BaseDirectory, "models", "all-MiniLM-L6-v2.onnx"),
-            // Common dev locations
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".hgvmate", "data", "models", "all-MiniLM-L6-v2.onnx"),
-            "/app/models/all-MiniLM-L6-v2.onnx",
-            "/data/models/all-MiniLM-L6-v2.onnx",
+            Path.Combine(AppContext.BaseDirectory, "models"),
+            Path.Combine(AppContext.BaseDirectory, "data", "models"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".hgvmate", "data", "models"),
+            "/app/models",
+            "/data/models",
         };
 
-        return candidates.FirstOrDefault(File.Exists);
+        foreach (var dir in directories)
+            foreach (var name in modelNames)
+            {
+                var path = Path.Combine(dir, name);
+                if (File.Exists(path)) return path;
+            }
+
+        return null;
     }
 }

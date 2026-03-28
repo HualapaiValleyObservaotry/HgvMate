@@ -72,7 +72,7 @@ public class IndexingService
         var files = GetIndexableFiles(repoRoot);
         int fileCount = 0, chunkCount = 0, skippedCount = 0;
         var skippedFiles = new List<string>();
-        int batchSize = _searchOptions.OnnxBatchSize;
+        int batchSize = Math.Max(1, _searchOptions.OnnxBatchSize);
 
         foreach (var filePath in files)
         {
@@ -144,7 +144,7 @@ public class IndexingService
         var content = await File.ReadAllTextAsync(fullPath, cancellationToken);
         var chunks = ChunkText(content);
         var sourceChunks = new List<SourceChunk>();
-        int batchSize = _searchOptions.OnnxBatchSize;
+        int batchSize = Math.Max(1, _searchOptions.OnnxBatchSize);
 
         for (int batchStart = 0; batchStart < chunks.Count; batchStart += batchSize)
         {

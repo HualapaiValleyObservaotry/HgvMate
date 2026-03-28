@@ -57,8 +57,8 @@ The included `docker-compose.yml` sets recommended resource limits (2 vCPU, 2 GB
 
 | Resource | Baseline (up to 20 repos) | Scaled (30+ repos) |
 |----------|--------------------------|---------------------|
-| **CPU** | 2 vCPUs | 4 vCPUs |
-| **Memory** | 2 GB | 4 GB |
+| **CPU** | 2 vCPUs | 4+ vCPUs |
+| **Memory** | 4 GB | 6 GB |
 | **Data volume** | 20 GB | 40 GB+ |
 
 Resource limits **cannot** be set in the Dockerfile — they are applied at deployment time via `docker run` flags, `docker-compose.yml`, or your orchestrator (Kubernetes, Proxmox, etc.).
@@ -67,7 +67,7 @@ Resource limits **cannot** be set in the Dockerfile — they are applied at depl
 
 ```bash
 docker run -d \
-  --cpus=2 --memory=2g \
+  --cpus=2 --memory=4g \
   -e HGVMATE_TRANSPORT=sse \
   -p 5000:5000 \
   -v hgvmate-data:/data \

@@ -159,7 +159,6 @@ public class RepoSyncService : BackgroundService
             }
 
             await _registry.UpdateLastSyncedAsync(repo.Name, DateTime.UtcNow);
-            _logger.LogInformation("Repo '{Name}' synced successfully (SHA: {Sha}).", repo.Name, newSha);
 
             if (isFirstSync || string.IsNullOrEmpty(oldSha))
             {
@@ -210,6 +209,7 @@ public class RepoSyncService : BackgroundService
                 _logger.LogInformation("Repo '{Name}' is up-to-date (SHA: {Sha}). Skipping re-index.", repo.Name, newSha);
             }
 
+            _logger.LogInformation("Repo '{Name}' synced successfully (SHA: {Sha}).", repo.Name, newSha);
             await _registry.ClearSyncErrorAsync(repo.Name);
             _telemetry?.TrackEvent("hgvmate.repo.sync_completed");
             HgvMateDiagnostics.RepoSyncTotal.Add(1, new KeyValuePair<string, object?>("repo", repo.Name), new KeyValuePair<string, object?>("status", "success"));

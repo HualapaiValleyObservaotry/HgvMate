@@ -30,6 +30,7 @@ services:
       # Credentials (set these or use a .env file)
       # - GITHUB_TOKEN=
       # - AZURE_DEVOPS_PAT=
+    env_file: .env
     ports:
       - "5000:5000"
     volumes:

@@ -157,8 +157,13 @@ public sealed class OnnxEmbedderTests
         var searchOptions = new SearchOptions { OnnxThreadCount = 2 };
         var (_, providerName) = OnnxEmbedder.CreateSessionOptions(searchOptions);
 
-        // In CI/test environment without GPU, should fall back to CPU
-        Assert.AreEqual("CPU", providerName);
+        // Provider should be one of the known execution providers, depending on environment
+        var allowedProviders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "CPU", "CUDA", "DML", "OpenVINO", "CoreML"
+        };
+        Assert.Contains(providerName, allowedProviders,
+            $"Unexpected provider name '{providerName}'.");
     }
 
     // ─── CPU feature detection tests ─────────────────────────────────────────
@@ -194,6 +199,7 @@ public sealed class OnnxEmbedderTests
     {
         var embedder = new OnnxEmbedder((Microsoft.ML.OnnxRuntime.InferenceSession?)null,
             NullLogger<OnnxEmbedder>.Instance);
-        Assert.IsNotEmpty(embedder.CpuFeatures);
+        var expected = OnnxEmbedder.DetectCpuFeatures();
+        CollectionAssert.AreEqual(expected.ToList(), embedder.CpuFeatures.ToList());
     }
 }

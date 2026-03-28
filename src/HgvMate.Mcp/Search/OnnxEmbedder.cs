@@ -81,7 +81,7 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
 
                 _logger.LogInformation(
                     "ONNX model loaded: provider={Provider}, model={ModelType}, file={FileName}, threads={Threads}, cpus={Cpus}, cpuFeatures=[{CpuFeatures}], path='{Path}'.",
-                    ExecutionProvider, ModelType, ModelFileName, ThreadCount, Environment.ProcessorCount, string.Join(", ", CpuFeatures), modelPath);
+                    ExecutionProvider, ModelType, SelectedModelFile, ThreadCount, Environment.ProcessorCount, string.Join(", ", CpuFeatures), modelPath);
 
                 // Publish to shared telemetry gauges
                 HgvMateDiagnostics.SetOnnxProvider(ExecutionProvider);
@@ -102,7 +102,7 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
     /// <summary>
     /// Creates optimized SessionOptions with auto-detected thread count and execution providers.
     /// Thread count: if OnnxThreadCount is 0 (auto), uses half of available CPUs (clamped 1-16).
-    /// Execution providers: tries CUDA → CoreML → CPU based on platform and hardware.
+    /// Execution providers: tries CUDA → OpenVINO → CoreML → CPU based on platform and hardware.
     /// </summary>
     internal static (OrtSessionOptions Options, string ProviderName) CreateSessionOptions(SearchOptions searchOptions, ILogger? logger = null)
     {
@@ -161,12 +161,12 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
 
     private static bool TryAppendOpenVino(OrtSessionOptions options, ILogger? logger)
     {
-        // OpenVINO requires Intel.ML.OnnxRuntime.OpenVino NuGet (Windows) or custom Linux build.
-        // The AppendExecutionProvider_OpenVINO method is only available when the OpenVINO native
-        // libs are present. We use reflection to avoid a hard compile-time dependency.
+        // OpenVINO requires Intel.ML.OnnxRuntime.OpenVino NuGet (Windows) or a custom Linux build
+        // with OpenVINO enabled. The AppendExecutionProvider_OpenVINO extension method may not be
+        // available or may throw if the native OpenVINO libraries are missing or the platform is
+        // not supported. We call it directly and rely on exception handling to avoid hard failures.
         try
         {
-            // Try the standard OpenVINO API — will throw if not available
             options.AppendExecutionProvider_OpenVINO("CPU");
             logger?.LogInformation("ONNX OpenVINO execution provider enabled (Intel CPU).");
             return true;
@@ -271,6 +271,9 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
             httpClient.Timeout = TimeSpan.FromMinutes(10);
 
             var tempPath = downloadPath + ".download";
+            // NOTE: Synchronous download in constructor. The model is pre-baked in Docker images,
+            // so this path only runs in local dev when the model is missing. WarmupService handles
+            // async startup; this fallback blocks briefly to ensure the embedder is ready.
             using (var response = httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
             {
                 response.EnsureSuccessStatusCode();
