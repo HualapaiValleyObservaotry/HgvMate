@@ -1,6 +1,8 @@
 # ── Stage 1: build ────────────────────────────────────────────────────────────
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG TARGETARCH
+# OnnxProvider: cpu (default) or openvino (Intel CPU acceleration)
+ARG ONNX_PROVIDER=cpu
 WORKDIR /src
 COPY . .
 RUN dotnet_rid="linux-$([ "$TARGETARCH" = "amd64" ] && echo x64 || echo $TARGETARCH)" && \
@@ -9,6 +11,7 @@ RUN dotnet_rid="linux-$([ "$TARGETARCH" = "amd64" ] && echo x64 || echo $TARGETA
     -r "$dotnet_rid" \
     --self-contained true \
     -p:PublishSingleFile=false \
+    -p:OnnxProvider="$ONNX_PROVIDER" \
     -o /app
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
@@ -30,6 +33,30 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
 
 WORKDIR /app
 COPY --from=build /app .
+
+# ── OpenVINO native libraries (when ONNX_PROVIDER=openvino) ──────────────────
+# Pre-extracted .so files from onnxruntime-openvino Python wheel, stored as a
+# GitHub Release artifact. Only downloaded when building with OpenVINO support.
+# To update: run tools/extract-openvino-libs.sh, upload tarball to GitHub Release.
+ARG ONNX_PROVIDER=cpu
+ARG OPENVINO_LIBS_TAG=openvino-libs/v1.24.1
+ARG GITHUB_REPO=RoySalisbury/HgvMate
+RUN if [ "$ONNX_PROVIDER" = "openvino" ]; then \
+      echo "Downloading OpenVINO native libs from GitHub Release ${OPENVINO_LIBS_TAG}..." && \
+      curl -fSL "https://github.com/${GITHUB_REPO}/releases/download/${OPENVINO_LIBS_TAG}/linux-x64.tar.gz" \
+        -o /tmp/openvino-libs.tar.gz && \
+      tar -xzf /tmp/openvino-libs.tar.gz -C /app/ --strip-components=1 linux-x64/ && \
+      rm /tmp/openvino-libs.tar.gz && \
+      # .NET P/Invoke looks for 'onnxruntime.dll' — create symlink to the real .so
+      cd /app && ln -sf libonnxruntime.so.1.24.1 onnxruntime.dll && \
+      echo "OpenVINO libs installed:" && ls -lh /app/libonnxruntime*.so* /app/libopenvino*.so* /app/onnxruntime.dll 2>/dev/null ; \
+    else \
+      echo "ONNX_PROVIDER=${ONNX_PROVIDER}, skipping OpenVINO libs download." ; \
+    fi
+
+# Ensure transitive .so dependencies (libopenvino.so, libtbb.so, etc.) are found at runtime.
+# Only needed when OpenVINO libs are present; harmless otherwise.
+ENV LD_LIBRARY_PATH=/app
 
 ENV HF_ONNX_BASE="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/"
 

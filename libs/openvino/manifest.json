@@ -1,0 +1,25 @@
+{
+  "onnxruntime_openvino_version": "1.24.1",
+  "platform": "linux-x64",
+  "source_wheel": "onnxruntime_openvino-1.24.1-cp312-cp312-manylinux_2_28_x86_64.whl",
+  "extracted_date": "2026-03-27T23:51:19Z",
+  "files": [
+    "libonnxruntime_providers_openvino.so",
+    "libonnxruntime_providers_shared.so",
+    "libonnxruntime.so",
+    "libonnxruntime.so.1.24.1",
+    "libopenvino_c.so",
+    "libopenvino_c.so.2025.4.1",
+    "libopenvino_c.so.2541",
+    "libopenvino_intel_cpu_plugin.so",
+    "libopenvino_onnx_frontend.so",
+    "libopenvino_onnx_frontend.so.2025.4.1",
+    "libopenvino_onnx_frontend.so.2541",
+    "libopenvino.so",
+    "libopenvino.so.2025.4.1",
+    "libopenvino.so.2541",
+    "libtbbmalloc.so",
+    "libtbb.so",
+    "libtbb.so.12"
+  ]
+}

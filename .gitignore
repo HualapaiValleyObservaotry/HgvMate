@@ -9,3 +9,8 @@ obj/
 .data/
 add-repos.sh
 nohup.out
+
+# OpenVINO native libs — large binaries stored as GitHub Release artifacts
+# Keep tools/extract-openvino-libs.sh and libs/openvino/manifest.json in git
+libs/openvino/linux-x64/
+libs/openvino/*.tar.gz
