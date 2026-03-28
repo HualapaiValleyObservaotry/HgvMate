@@ -28,13 +28,18 @@ fi
 
 echo "Fetching .env from private gist..."
 
-# ── Resolve GitHub token (credential helper available at attach time) ─
+# ── Resolve GitHub token (credential helper may need a moment to init) ─
 token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
 if [ -z "$token" ] && command -v gh >/dev/null 2>&1; then
 	token=$(gh auth token 2>/dev/null) || true
 fi
 if [ -z "$token" ] && command -v git >/dev/null 2>&1; then
-	token=$(printf 'protocol=https\nhost=github.com\n' | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null | grep '^password=' | head -1 | cut -d= -f2-) || true
+	for attempt in 1 2 3 4 5; do
+		token=$(printf 'protocol=https\nhost=github.com\n' | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null | grep '^password=' | head -1 | cut -d= -f2-) || true
+		[ -n "$token" ] && break
+		echo "  Waiting for credential helper (attempt $attempt/5)..."
+		sleep 2
+	done
 fi
 
 if [ -z "$token" ]; then
