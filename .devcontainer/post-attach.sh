@@ -1,8 +1,8 @@
 #!/bin/bash
 # post-attach.sh — Runs each time VS Code attaches to the container.
-# Fetches the private .env gist when it's missing. The VS Code git
-# credential helper is only available at attach time, not during
-# postCreateCommand, so this is the earliest we can authenticate.
+# Fetches the private .env gist when it's missing, and sets up a
+# one-shot .zshrc hook as a fallback (the credential helper isn't
+# always ready during postAttachCommand on first build).
 set -e
 
 HGVMATE_ENV_GIST="1f014918502877f0c37738fa733dad65"
@@ -10,14 +10,18 @@ BASE_GIST="bceb71a9120e4d393b68308a03399ca5"
 ENV_FILE="/workspaces/HgvMate/.env"
 WORKSPACE="/workspaces/HgvMate"
 
-# ── Ensure .env sourcing is in .zshrc (idempotent) ───────────────────
+# ── Ensure .env sourcing + one-shot fetch hook in .zshrc (idempotent) ─
 ZSHRC="$HOME/.zshrc"
 SOURCE_LINE='[ -f /workspaces/HgvMate/.env ] && set -a && source /workspaces/HgvMate/.env && set +a'
+FETCH_LINE='[ ! -f /workspaces/HgvMate/.env ] && [ -f /workspaces/HgvMate/.devcontainer/post-attach.sh ] && bash /workspaces/HgvMate/.devcontainer/post-attach.sh 2>/dev/null'
 if ! grep -qF "$SOURCE_LINE" "$ZSHRC" 2>/dev/null; then
-	echo "" >> "$ZSHRC"
-	echo "# Auto-source HgvMate .env" >> "$ZSHRC"
-	echo "$SOURCE_LINE" >> "$ZSHRC"
-	echo "Added .env sourcing to $ZSHRC"
+	{
+		echo ""
+		echo "# Auto-fetch and source HgvMate .env"
+		echo "$FETCH_LINE"
+		echo "$SOURCE_LINE"
+	} >> "$ZSHRC"
+	echo "Added .env fetch hook and sourcing to $ZSHRC"
 fi
 
 # ── Skip fetch if .env already exists ────────────────────────────────
@@ -28,23 +32,17 @@ fi
 
 echo "Fetching .env from private gist..."
 
-# ── Resolve GitHub token (credential helper may need a moment to init) ─
+# ── Resolve GitHub token ──────────────────────────────────────────────
 token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
 if [ -z "$token" ] && command -v gh >/dev/null 2>&1; then
 	token=$(gh auth token 2>/dev/null) || true
 fi
 if [ -z "$token" ] && command -v git >/dev/null 2>&1; then
-	for attempt in 1 2 3 4 5; do
-		token=$(printf 'protocol=https\nhost=github.com\n' | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null | grep '^password=' | head -1 | cut -d= -f2-) || true
-		[ -n "$token" ] && break
-		echo "  Waiting for credential helper (attempt $attempt/5)..."
-		sleep 2
-	done
+	token=$(printf 'protocol=https\nhost=github.com\n' | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null | grep '^password=' | head -1 | cut -d= -f2-) || true
 fi
 
 if [ -z "$token" ]; then
-	echo "⚠  No GitHub token available — cannot fetch .env gist."
-	echo "   Create $ENV_FILE manually if needed."
+	echo "⚠  No GitHub token available yet — .env will be fetched when you open your first terminal."
 	exit 0
 fi
 
