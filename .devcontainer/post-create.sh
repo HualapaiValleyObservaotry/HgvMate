@@ -12,8 +12,16 @@ echo "Running HgvMate post-create setup..."
 BASE_GIST="bceb71a9120e4d393b68308a03399ca5"
 
 _load_base_script() {
-	# Try gh first (works with private gists + authenticated), fall back to curl
+	# Resolve a GitHub token: env vars → gh auth → VS Code git credential helper
 	local token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+	if [ -z "$token" ] && command -v gh >/dev/null 2>&1; then
+		token=$(gh auth token 2>/dev/null) || true
+	fi
+	if [ -z "$token" ] && command -v git >/dev/null 2>&1; then
+		token=$(printf 'protocol=https\nhost=github.com\n' | git credential fill 2>/dev/null | grep '^password=' | head -1 | cut -d= -f2-) || true
+	fi
+
+	# Try gh first (works with private gists + authenticated), fall back to curl
 	if command -v gh >/dev/null 2>&1 && [ -n "$token" ]; then
 		GH_TOKEN="$token" gh gist view "$BASE_GIST" --raw --filename devcontainer-base.sh 2>/dev/null && return 0
 	fi
