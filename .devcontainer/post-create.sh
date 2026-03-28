@@ -111,9 +111,14 @@ if [ -n "${SSH_PRIVATE_KEY:-}" ] && [ ! -f /home/vscode/.ssh/id_ed25519 ]; then
 	# Handle both literal \n-escaped strings (from .env) and real newlines (from Codespace secrets)
 	printf '%b\n' "$SSH_PRIVATE_KEY" > /home/vscode/.ssh/id_ed25519
 	chmod 600 /home/vscode/.ssh/id_ed25519
-	ssh-keygen -y -f /home/vscode/.ssh/id_ed25519 > /home/vscode/.ssh/id_ed25519.pub
-	chmod 644 /home/vscode/.ssh/id_ed25519.pub
-	echo "SSH key restored."
+	# Validate the key before generating the public key
+	if ssh-keygen -y -f /home/vscode/.ssh/id_ed25519 > /home/vscode/.ssh/id_ed25519.pub 2>/dev/null; then
+		chmod 644 /home/vscode/.ssh/id_ed25519.pub
+		echo "SSH key restored."
+	else
+		echo "Warning: SSH_PRIVATE_KEY is set but the key is invalid. Removing bad key file."
+		rm -f /home/vscode/.ssh/id_ed25519 /home/vscode/.ssh/id_ed25519.pub
+	fi
 fi
 
 # Create Docker contexts for remote hosts (survives rebuilds)
