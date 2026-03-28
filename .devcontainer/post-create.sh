@@ -38,6 +38,25 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────
+# Resolve and export a GitHub token so base script functions can use it
+# (In local devcontainers, GH_TOKEN/GITHUB_TOKEN aren't set by default)
+# ─────────────────────────────────────────────────────────────────────
+if [ -z "${GH_TOKEN:-}" ] && [ -z "${GITHUB_TOKEN:-}" ]; then
+	_resolved_token=""
+	if command -v gh >/dev/null 2>&1; then
+		_resolved_token=$(gh auth token 2>/dev/null) || true
+	fi
+	if [ -z "$_resolved_token" ] && command -v git >/dev/null 2>&1; then
+		_resolved_token=$(printf 'protocol=https\nhost=github.com\n' | git credential fill 2>/dev/null | grep '^password=' | head -1 | cut -d= -f2-) || true
+	fi
+	if [ -n "$_resolved_token" ]; then
+		export GH_TOKEN="$_resolved_token"
+		echo "Resolved GitHub token from credential helper (${#_resolved_token} chars)"
+	fi
+	unset _resolved_token
+fi
+
+# ─────────────────────────────────────────────────────────────────────
 # Shared setup (env bootstrap, .NET, CLI tools, Docker, SSH, contexts)
 # ─────────────────────────────────────────────────────────────────────
 HGVMATE_ENV_GIST="1f014918502877f0c37738fa733dad65"
