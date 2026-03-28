@@ -15,6 +15,34 @@ if [ -f /workspaces/HgvMate/.env ]; then
 	# shellcheck disable=SC1091
 	source /workspaces/HgvMate/.env
 	set +a
+
+	# Also make .env vars available in all future terminal sessions.
+	# In Codespaces, secrets are injected via remoteEnv; locally, .env is the source.
+	BASHRC="/home/vscode/.bashrc"
+	MARKER="# >>> HgvMate .env >>>"
+	if ! grep -qF "$MARKER" "$BASHRC" 2>/dev/null; then
+		echo "Adding .env sourcing to $BASHRC..."
+		cat >> "$BASHRC" <<'ENVBLOCK'
+
+# >>> HgvMate .env >>>
+if [ -f /workspaces/HgvMate/.env ]; then
+    set -a; source /workspaces/HgvMate/.env; set +a
+fi
+# <<< HgvMate .env <<<
+ENVBLOCK
+	fi
+elif [ -z "${CODESPACES:-}" ]; then
+	# Local devcontainer without .env — warn the user
+	echo ""
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	echo "⚠  No .env file found and this is not a GitHub Codespace."
+	echo "   Secrets (SSH keys, PATs, etc.) will not be available."
+	echo ""
+	echo "   To bootstrap .env from a Codespace, run:"
+	echo "     bash .devcontainer/export-env.sh"
+	echo "   inside a Codespace, then copy the .env file here."
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	echo ""
 fi
 
 # Fix .dotnet directory ownership
@@ -76,11 +104,12 @@ else
 	echo "Using existing SSH agent at $SSH_AUTH_SOCK"
 fi
 
-# Restore SSH key from Codespace secret (survives rebuilds)
+# Restore SSH key from Codespace secret or .env (survives rebuilds)
 if [ -n "${SSH_PRIVATE_KEY:-}" ] && [ ! -f /home/vscode/.ssh/id_ed25519 ]; then
-	echo "Restoring SSH key from Codespace secret..."
+	echo "Restoring SSH key..."
 	mkdir -p /home/vscode/.ssh
-	echo "$SSH_PRIVATE_KEY" > /home/vscode/.ssh/id_ed25519
+	# Handle both literal \n-escaped strings (from .env) and real newlines (from Codespace secrets)
+	printf '%b\n' "$SSH_PRIVATE_KEY" > /home/vscode/.ssh/id_ed25519
 	chmod 600 /home/vscode/.ssh/id_ed25519
 	ssh-keygen -y -f /home/vscode/.ssh/id_ed25519 > /home/vscode/.ssh/id_ed25519.pub
 	chmod 644 /home/vscode/.ssh/id_ed25519.pub

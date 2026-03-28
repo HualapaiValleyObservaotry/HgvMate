@@ -1,11 +1,7 @@
-# See here for image contents: https://github.com/devcontainers/images/tree/main/src/dotnet
-FROM mcr.microsoft.com/devcontainers/dotnet:1-10.0
+# Use a base image without .NET pre-installed so we can control the exact
+# SDK version via the devcontainer dotnet feature (avoids stale RC builds).
+FROM mcr.microsoft.com/devcontainers/base:ubuntu
 
-# The base image currently includes a Yarn APT source (dl.yarnpkg.com) but does not
-# include the corresponding signing key, which causes apt operations to fail with:
-#   NO_PUBKEY 62D54FD4003F6525
-# Remove it to keep apt stable for both feature installs and post-create steps.
-RUN set -e; \
-    rm -f /etc/apt/sources.list.d/yarn.list || true; \
-    rm -f /etc/apt/sources.list.d/yarn.sources || true; \
-    apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+# The default dotnet/sdk image sets NUGET_XMLDOC_MODE=skip to save space.
+# Clear it so NuGet XML docs are extracted (richer IntelliSense tooltips).
+ENV NUGET_XMLDOC_MODE=
