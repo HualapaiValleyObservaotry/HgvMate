@@ -201,6 +201,26 @@ docker build -t hgvmate .
 docker build --build-arg ONNX_PROVIDER=openvino -t hgvmate:openvino .
 ```
 
+**Pre-built images on GHCR (pushed by CI on every merge to main):**
+
+| Tag | Description |
+|-----|-------------|
+| `ghcr.io/roysalisbury/hgvmate:latest` | Universal CPU image |
+| `ghcr.io/roysalisbury/hgvmate:cpu` | Same as `latest` (explicit alias) |
+| `ghcr.io/roysalisbury/hgvmate:openvino` | Intel OpenVINO-optimized (x86-64 only) |
+| `ghcr.io/roysalisbury/hgvmate:<sha>` | Specific commit (CPU) |
+| `ghcr.io/roysalisbury/hgvmate:<sha>-openvino` | Specific commit (OpenVINO) |
+
+**Pulling from Portainer or CLI:**
+
+```bash
+# On any machine (Mac, Proxmox, cloud VM):
+docker pull ghcr.io/roysalisbury/hgvmate:latest
+
+# On Intel servers (Proxmox, bare metal):
+docker pull ghcr.io/roysalisbury/hgvmate:openvino
+```
+
 ### Running on Any Machine
 
 ```bash

@@ -5,12 +5,16 @@
 # Prerequisites:
 #   mkdir -p /opt/hgvmate/data
 #
+# Image tags:
+#   ghcr.io/roysalisbury/hgvmate:latest   — universal CPU image
+#   ghcr.io/roysalisbury/hgvmate:openvino — Intel-optimized (recommended for Proxmox)
+#
 # Dashboard UI: http://<proxmox-ip>:18888
 # MCP endpoint:  http://<proxmox-ip>:5000/mcp
 
 services:
   hgvmate:
-    image: ghcr.io/roysalisbury/hgvmate:latest
+    image: ghcr.io/roysalisbury/hgvmate:openvino
     container_name: hgvmate-mcp
     environment:
       - HGVMATE_TRANSPORT=sse

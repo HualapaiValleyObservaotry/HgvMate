@@ -28,20 +28,40 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
+      - name: Extract metadata (CPU)
+        id: meta-cpu
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest
-            type=raw,value=dev
+            type=raw,value=cpu
             type=sha,prefix=
 
-      - name: Build and push
+      - name: Build and push (CPU — universal)
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta-cpu.outputs.tags }}
+          labels: ${{ steps.meta-cpu.outputs.labels }}
+
+      - name: Extract metadata (OpenVINO)
+        id: meta-openvino
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=openvino
+            type=raw,value=openvino-latest
+            type=sha,prefix=,suffix=-openvino
+
+      - name: Build and push (OpenVINO — Intel x86-64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta-openvino.outputs.tags }}
+          labels: ${{ steps.meta-openvino.outputs.labels }}
+          build-args: |
+            ONNX_PROVIDER=openvino
