@@ -195,23 +195,25 @@ public static class ApiEndpoints
         })
         .WithSummary("Remove a repository and delete its cloned data");
 
-        repos.MapPost("/{name}/reindex", async (string name, IRepoRegistry registry, RepoSyncService syncService) =>
+        repos.MapPost("/{name}/reindex", async (string name, bool? force, IRepoRegistry registry, RepoSyncService syncService) =>
         {
             var repo = await registry.GetByNameAsync(name);
             if (repo == null)
                 return Results.NotFound(new { error = $"Repository '{name}' not found." });
 
-            _ = Task.Run(() => syncService.SyncRepoAsync(repo));
-            return Results.Accepted(value: new { message = $"Reindex triggered for '{name}'." });
+            var isForce = force == true;
+            _ = Task.Run(() => syncService.SyncRepoAsync(repo, isForce));
+            return Results.Accepted(value: new { message = $"Reindex triggered for '{name}'{(isForce ? " (force)" : "")}." });
         })
-        .WithSummary("Trigger reindex for a specific repository");
+        .WithSummary("Trigger reindex for a specific repository. Use ?force=true to re-embed even if unchanged.");
 
-        repos.MapPost("/reindex", async (IRepoRegistry registry, RepoSyncService syncService) =>
+        repos.MapPost("/reindex", async (bool? force, IRepoRegistry registry, RepoSyncService syncService) =>
         {
-            _ = Task.Run(() => syncService.SyncAllAsync());
-            return TypedResults.Ok(new { message = "Reindex triggered for all repositories." });
+            var isForce = force == true;
+            _ = Task.Run(() => syncService.SyncAllAsync(isForce));
+            return TypedResults.Ok(new { message = $"Reindex triggered for all repositories{(isForce ? " (force)" : "")}." });
         })
-        .WithSummary("Trigger reindex for all repositories");
+        .WithSummary("Trigger reindex for all repositories. Use ?force=true to re-embed even if unchanged.");
 
         repos.MapGet("/{name}/status", async (string name, IRepoRegistry registry) =>
         {

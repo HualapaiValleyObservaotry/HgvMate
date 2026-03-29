@@ -18,4 +18,11 @@ public class SearchOptions
     /// Higher values improve throughput but use more memory.
     /// </summary>
     public int OnnxBatchSize { get; set; } = 32;
+
+    /// <summary>
+    /// Force a specific ONNX execution provider instead of auto-detection.
+    /// Supported: "auto" (default), "cuda", "openvino", "cpu".
+    /// Auto tries CUDA → OpenVINO → CPU in order.
+    /// </summary>
+    public string OnnxProvider { get; set; } = "auto";
 }

@@ -5,7 +5,7 @@
 # Usage: ./tools/extract-openvino-libs.sh [version]
 #   version: onnxruntime-openvino PyPI version (default: 1.24.1)
 #
-# Output: libs/openvino/linux-x64/*.so  (CPU-only subset, ~127 MB)
+# Output: libs/openvino/linux-x64/*.so  (CPU+GPU subset, ~145 MB)
 #         libs/openvino/linux-x64.tar.gz (compressed tarball for GitHub Release)
 set -euo pipefail
 
