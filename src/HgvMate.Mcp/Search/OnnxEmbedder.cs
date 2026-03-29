@@ -125,17 +125,47 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
         options.InterOpNumThreads = 1;
 
         // ── Execution provider auto-detection ────────────────────────────
-        var providerName = TryAppendBestExecutionProvider(options, logger);
+        var providerName = TryAppendBestExecutionProvider(options, searchOptions, logger);
 
         return (options, providerName);
     }
 
-    internal static string TryAppendBestExecutionProvider(OrtSessionOptions options, ILogger? logger)
+    internal static string TryAppendBestExecutionProvider(OrtSessionOptions options, SearchOptions searchOptions, ILogger? logger)
     {
-        // Priority: CUDA (NVIDIA GPU) → OpenVINO (Intel CPU/iGPU) → CPU (default)
+        var provider = searchOptions.OnnxProvider?.Trim() ?? "auto";
+
+        // Validate supported values
+        var supported = new[] { "auto", "cuda", "openvino", "cpu" };
+        if (!supported.Any(s => string.Equals(provider, s, StringComparison.OrdinalIgnoreCase)))
+        {
+            logger?.LogWarning("Unknown OnnxProvider '{Provider}'. Supported values: {Supported}. Falling back to auto.",
+                provider, string.Join(", ", supported));
+            provider = "auto";
+        }
+
+        // Explicit provider override — skip auto-detection
+        if (string.Equals(provider, "cuda", StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryAppendCuda(options, logger)) return "CUDA";
+            logger?.LogWarning("CUDA provider requested but not available. Falling back to CPU.");
+            return "CPU";
+        }
+        if (string.Equals(provider, "openvino", StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryAppendOpenVino(options, logger)) return "OpenVINO";
+            logger?.LogWarning("OpenVINO provider requested but not available. Falling back to CPU.");
+            return "CPU";
+        }
+        if (string.Equals(provider, "cpu", StringComparison.OrdinalIgnoreCase))
+        {
+            logger?.LogInformation("ONNX using CPU execution provider (forced).");
+            return "CPU";
+        }
+
+        // Auto-detection: CUDA → OpenVINO → CPU
         // CoreML was tested on Apple Silicon and found to be slower than CPU-only
         // for small models (MiniLM-L6-v2), while burning ~300% CPU at idle.
-
+        // Intel iGPU was tested and found ~20x slower than CPU AVX-VNNI for INT8 models.
         if (TryAppendCuda(options, logger)) return "CUDA";
         if (TryAppendOpenVino(options, logger)) return "OpenVINO";
 
@@ -164,15 +194,19 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
         // with OpenVINO enabled. The AppendExecutionProvider_OpenVINO extension method may not be
         // available or may throw if the native OpenVINO libraries are missing or the platform is
         // not supported. We call it directly and rely on exception handling to avoid hard failures.
+        //
+        // Always targets CPU. Intel iGPU was tested (i9-14900K) and found ~20x slower than
+        // CPU AVX-VNNI for INT8-quantized models due to OpenCL compilation overhead and
+        // CPU↔GPU memory transfer latency.
+
         try
         {
             options.AppendExecutionProvider_OpenVINO("CPU");
-            logger?.LogInformation("ONNX OpenVINO execution provider enabled (Intel CPU).");
+            logger?.LogInformation("ONNX OpenVINO execution provider enabled (device: CPU).");
             return true;
         }
         catch (Exception)
         {
-            // OpenVINO not available — package not installed or wrong platform
             return false;
         }
     }

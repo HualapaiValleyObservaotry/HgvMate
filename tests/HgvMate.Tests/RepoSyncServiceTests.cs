@@ -413,6 +413,64 @@ public sealed class RepoSyncServiceTests
         Assert.IsFalse(RepoSyncService.IsTransientError(new TaskCanceledException()));
     }
 
+    // ─── Force reindex tests ─────────────────────────────────────────────────
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task SyncRepoAsync_ForceReindex_WhenShaUnchangedAndVectorsExist()
+    {
+        const string sha = "aabbcc";
+        var repo = new RepoRecord(1, "myrepo", "https://example.com/r.git", "main", "github", true, sha, null, null);
+
+        var clonePath = Path.Combine(_tempDir, "repos", "myrepo");
+        Directory.CreateDirectory(Path.Combine(clonePath, ".git"));
+
+        var responses = new Dictionary<string[], (string, int)>(StringArrayComparer.Instance)
+        {
+            { ["fetch", "--depth", "1", "origin", "main"], ("", 0) },
+            { ["reset", "--hard", "origin/main"], ("", 0) },
+            { ["rev-parse", "HEAD"], (sha + "\n", 0) }
+        };
+
+        var (svc, indexing, _) = await BuildServiceAsync(_tempDir, responses);
+
+        // Pre-populate vectors so normal sync would skip
+        indexing.VectorStore.UpsertChunk(new SourceChunk("myrepo", "src/Foo.cs", 0, "content", new float[384]));
+
+        await svc.SyncRepoAsync(repo, force: true);
+
+        Assert.AreEqual(1, indexing.IndexRepoCalls, "Force=true should trigger full re-index even when SHA is unchanged.");
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task SyncRepoAsync_ForceReindex_WhenReclonedShaUnchangedAndVectorsExist()
+    {
+        const string sha = "aabbcc";
+        var repo = new RepoRecord(1, "myrepo", "https://example.com/r.git", "main", "github", true, sha, null, null);
+
+        var clonePath = Path.Combine(_tempDir, "repos", "myrepo");
+        Directory.CreateDirectory(clonePath); // no .git → re-clone
+
+        var responses = new Dictionary<string[], (string, int)>(StringArrayComparer.Instance)
+        {
+            {
+                ["clone", "--depth", "1", "--single-branch", "--branch", "main", "https://example.com/r.git", "."],
+                ("", 0)
+            },
+            { ["rev-parse", "HEAD"], (sha + "\n", 0) }
+        };
+
+        var (svc, indexing, _) = await BuildServiceAsync(_tempDir, responses);
+
+        // Pre-populate vectors — normal sync would skip re-index
+        indexing.VectorStore.UpsertChunk(new SourceChunk("myrepo", "src/Foo.cs", 0, "content", new float[384]));
+
+        await svc.SyncRepoAsync(repo, force: true);
+
+        Assert.AreEqual(1, indexing.IndexRepoCalls, "Force=true should override the skip-when-unchanged-and-cached logic.");
+    }
+
     private async Task<(RepoSyncService service, TrackingIndexingService indexing, TrackingRegistry registry)>
         BuildServiceWithMinDiskSpaceAsync(string tempDir, long minMb)
     {

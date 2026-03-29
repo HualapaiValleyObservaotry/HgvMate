@@ -3,6 +3,7 @@ name: Build and Publish Docker Image
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 env:
@@ -21,6 +22,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -28,40 +35,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (CPU)
-        id: meta-cpu
+      - name: Extract metadata
+        id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
             type=raw,value=latest
-            type=raw,value=cpu
             type=sha,prefix=
 
-      - name: Build and push (CPU — universal)
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta-cpu.outputs.tags }}
-          labels: ${{ steps.meta-cpu.outputs.labels }}
-
-      - name: Extract metadata (OpenVINO)
-        id: meta-openvino
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=openvino
-            type=raw,value=openvino-latest
-            type=sha,prefix=,suffix=-openvino
-
-      - name: Build and push (OpenVINO — Intel x86-64)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta-openvino.outputs.tags }}
-          labels: ${{ steps.meta-openvino.outputs.labels }}
-          build-args: |
-            ONNX_PROVIDER=openvino
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

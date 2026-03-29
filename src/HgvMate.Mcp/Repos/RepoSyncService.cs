@@ -93,26 +93,36 @@ public class RepoSyncService : BackgroundService
     }
 
     public virtual async Task SyncAllAsync(CancellationToken cancellationToken = default)
+        => await SyncAllAsync(force: false, cancellationToken);
+
+    public virtual async Task SyncAllAsync(bool force, CancellationToken cancellationToken = default)
     {
         using var activity = HgvMateDiagnostics.ActivitySource.StartActivity("SyncAll");
         var repos = await _registry.GetAllAsync();
         var enabledRepos = repos.Where(r => r.Enabled).ToList();
         activity?.SetTag("hgvmate.repo.count", enabledRepos.Count);
+        activity?.SetTag("hgvmate.sync.force", force);
         HgvMateDiagnostics.SetActiveRepoCount(enabledRepos.Count);
+
+        if (force)
+            _logger.LogInformation("Force reindex requested for all {Count} enabled repositories.", enabledRepos.Count);
 
         foreach (var repo in enabledRepos)
         {
             if (cancellationToken.IsCancellationRequested) break;
-            await SyncRepoAsync(repo, cancellationToken);
+            await SyncRepoAsync(repo, force, cancellationToken);
         }
     }
 
     public virtual async Task SyncRepoAsync(RepoRecord repo, CancellationToken cancellationToken = default)
+        => await SyncRepoAsync(repo, force: false, cancellationToken);
+
+    public virtual async Task SyncRepoAsync(RepoRecord repo, bool force, CancellationToken cancellationToken = default)
     {
         await _syncSemaphore.WaitAsync(cancellationToken);
         try
         {
-            await SyncRepoInternalAsync(repo, cancellationToken);
+            await SyncRepoInternalAsync(repo, force, cancellationToken);
         }
         finally
         {
@@ -120,11 +130,12 @@ public class RepoSyncService : BackgroundService
         }
     }
 
-    private async Task SyncRepoInternalAsync(RepoRecord repo, CancellationToken cancellationToken)
+    private async Task SyncRepoInternalAsync(RepoRecord repo, bool force, CancellationToken cancellationToken)
     {
         using var activity = HgvMateDiagnostics.ActivitySource.StartActivity("SyncRepo");
         activity?.SetTag("hgvmate.repo.name", repo.Name);
         activity?.SetTag("hgvmate.repo.source", repo.Source);
+        activity?.SetTag("hgvmate.sync.force", force);
 
         var clonePath = GetClonePath(repo.Name);
         _logger.LogInformation("Syncing repo '{Name}' to '{Path}'...", repo.Name, clonePath);
@@ -163,7 +174,7 @@ public class RepoSyncService : BackgroundService
             if (isFirstSync || string.IsNullOrEmpty(oldSha))
             {
                 // Re-cloned repo: skip vector re-index if SHA unchanged and vectors already cached
-                if (isFirstSync && newSha == oldSha && _indexingService.HasVectorsForRepo(repo.Name))
+                if (!force && isFirstSync && newSha == oldSha && _indexingService.HasVectorsForRepo(repo.Name))
                 {
                     _logger.LogInformation(
                         "Repo '{Name}' re-cloned but unchanged (SHA: {Sha}). Skipping vector re-index.",
@@ -203,6 +214,12 @@ public class RepoSyncService : BackgroundService
                     await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
                 }
                 await _registry.UpdateLastShaAsync(repo.Name, newSha);
+            }
+            else if (force)
+            {
+                _logger.LogInformation("Force re-index requested for repo '{Name}' (SHA: {Sha}).", repo.Name, newSha);
+                await _indexingService.IndexRepoAsync(repo.Name, cancellationToken);
+                await RunGitNexusAnalysisAsync(repo.Name, cancellationToken);
             }
             else
             {
