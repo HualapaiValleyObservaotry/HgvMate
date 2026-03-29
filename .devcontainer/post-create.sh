@@ -30,7 +30,7 @@ _load_base_script() {
 	return 1
 }
 
-BASE_SCRIPT=$(_load_base_script)
+BASE_SCRIPT=$(_load_base_script || true)
 if [ -n "$BASE_SCRIPT" ]; then
 	eval "$BASE_SCRIPT"
 else

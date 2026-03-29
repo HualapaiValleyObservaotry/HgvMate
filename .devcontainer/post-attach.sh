@@ -62,7 +62,7 @@ if [ -z "$env_content" ]; then
 	exit 0
 fi
 
-echo "$env_content" > "$ENV_FILE"
+printf '%s\n' "$env_content" > "$ENV_FILE"
 echo "✅ .env written to $ENV_FILE"
 
 # ── Source .env and run env-dependent setup (SSH, Docker, contexts) ───
