@@ -202,4 +202,44 @@ public sealed class OnnxEmbedderTests
         var expected = OnnxEmbedder.DetectCpuFeatures();
         CollectionAssert.AreEqual(expected.ToList(), embedder.CpuFeatures.ToList());
     }
+
+    // ─── Provider override tests ─────────────────────────────────────────────
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CreateSessionOptions_ForcedCpu_ReturnsCpu()
+    {
+        var searchOptions = new SearchOptions { OnnxThreadCount = 2, OnnxProvider = "cpu" };
+        var (_, providerName) = OnnxEmbedder.CreateSessionOptions(searchOptions);
+
+        Assert.AreEqual("CPU", providerName);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CreateSessionOptions_InvalidProvider_FallsBackToAuto()
+    {
+        var searchOptions = new SearchOptions { OnnxThreadCount = 2, OnnxProvider = "opneivno" };
+        var (_, providerName) = OnnxEmbedder.CreateSessionOptions(searchOptions);
+
+        // Invalid value falls back to auto, which resolves to one of the known providers
+        var allowedProviders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "CPU", "CUDA", "DML", "OpenVINO"
+        };
+        Assert.Contains(providerName, allowedProviders,
+            $"Invalid provider should fall back to auto. Got '{providerName}'.");
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CreateSessionOptions_ForcedCuda_FallsToCpu_WhenUnavailable()
+    {
+        // In CI/test environment, CUDA is not available
+        var searchOptions = new SearchOptions { OnnxThreadCount = 2, OnnxProvider = "cuda" };
+        var (_, providerName) = OnnxEmbedder.CreateSessionOptions(searchOptions);
+
+        // CUDA not present in test env → should fall back to CPU
+        Assert.AreEqual("CPU", providerName);
+    }
 }

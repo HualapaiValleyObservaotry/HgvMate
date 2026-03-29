@@ -134,6 +134,15 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
     {
         var provider = searchOptions.OnnxProvider?.Trim() ?? "auto";
 
+        // Validate supported values
+        var supported = new[] { "auto", "cuda", "openvino", "cpu" };
+        if (!supported.Any(s => string.Equals(provider, s, StringComparison.OrdinalIgnoreCase)))
+        {
+            logger?.LogWarning("Unknown OnnxProvider '{Provider}'. Supported values: {Supported}. Falling back to auto.",
+                provider, string.Join(", ", supported));
+            provider = "auto";
+        }
+
         // Explicit provider override — skip auto-detection
         if (string.Equals(provider, "cuda", StringComparison.OrdinalIgnoreCase))
         {

@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # so we simply leave them installed (adds ~100 MB to image, acceptable for correctness).
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
   apt-get install -y --no-install-recommends nodejs make g++ python3 && \
-  npm install -g gitnexus@latest && \
+  npm install -g gitnexus@1.4.10 && \
   rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -64,7 +64,6 @@ ENV HF_ONNX_BASE="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/
 
 # Download architecture-specific quantized ONNX models (~23 MB each, faster CPU inference)
 # and FP32 model as fallback (~90 MB). OnnxEmbedder picks the best match at runtime.
-ARG TARGETARCH
 RUN mkdir -p /app/models && \
   if [ "$TARGETARCH" = "arm64" ]; then \
   curl -fSL -o /app/models/model_qint8_arm64.onnx \

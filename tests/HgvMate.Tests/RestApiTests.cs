@@ -257,6 +257,20 @@ public sealed class RestApiTests : IDisposable
     }
 
     [TestMethod]
+    public async Task ReindexAll_Force_ReturnsOkWithForceMessage()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var response = await client.PostAsync("/api/repositories/reindex?force=true", null);
+
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var message = body.GetProperty("message").GetString()!;
+        Assert.Contains("(force)", message, $"Expected '(force)' in message but got: {message}");
+    }
+
+    [TestMethod]
     public async Task Diagnostics_ReturnsOk_WithExpectedFields()
     {
         await using var app = await CreateTestApp();
