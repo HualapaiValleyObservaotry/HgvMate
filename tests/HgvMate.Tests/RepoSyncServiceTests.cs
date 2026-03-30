@@ -689,9 +689,11 @@ public sealed class RepoSyncServiceTests
         // Verifies the bounded channel doesn't deadlock/throw when called many times
         var (svc, _, _) = await BuildServiceAsync(_tempDir);
 
-        // Enqueue many times — bounded channel with Wait mode should accept all entries
-        for (int i = 0; i < 50; i++)
-            svc.EnqueueGitNexusAnalysis($"repo{i}");
+        // Enqueue many times — bounded channel with Wait mode should accept all entries.
+        // EnqueueGitNexusAnalysis fire-and-forgets WriteAsync; await the async form directly
+        // here to confirm they all complete without error.
+        var tasks = Enumerable.Range(0, 50).Select(i => svc.EnqueueGitNexusAnalysisAsync($"repo{i}"));
+        await Task.WhenAll(tasks);
     }
 
     // ─── Inner test helpers ──────────────────────────────────────────────────

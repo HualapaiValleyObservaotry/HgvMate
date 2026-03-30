@@ -111,7 +111,9 @@ public class RepoSyncService : BackgroundService
     /// </summary>
     private async Task RunGitNexusWorkerAsync(CancellationToken cancellationToken)
     {
-        var inFlightTasks = new List<Task>();
+        // HashSet instead of List so we can prune completed tasks on each iteration,
+        // preventing unbounded growth across the service lifetime.
+        var inFlightTasks = new HashSet<Task>();
         try
         {
             await foreach (var repoName in _gitNexusQueue.Reader.ReadAllAsync(cancellationToken))
@@ -120,7 +122,7 @@ public class RepoSyncService : BackgroundService
                 // Do not pass cancellationToken to Task.Run — a cancelled token would prevent the
                 // delegate from running while still holding the semaphore permit (leak).
                 // Instead, handle cancellation inside the delegate itself.
-                inFlightTasks.Add(Task.Run(async () =>
+                var task = Task.Run(async () =>
                 {
                     try
                     {
@@ -138,7 +140,10 @@ public class RepoSyncService : BackgroundService
                     {
                         _gitNexusSemaphore.Release();
                     }
-                }));
+                });
+                inFlightTasks.Add(task);
+                // Remove completed tasks to prevent the set growing unbounded
+                inFlightTasks.RemoveWhere(t => t.IsCompleted);
             }
         }
         catch (OperationCanceledException)
@@ -405,12 +410,26 @@ public class RepoSyncService : BackgroundService
     /// <summary>
     /// Enqueues a GitNexus analysis for <paramref name="repoName"/> to run in the background worker.
     /// This decouples ONNX embedding (CPU-bound) from GitNexus analysis (I/O-bound) so they overlap.
+    /// Fire-and-forget: delegates to <see cref="EnqueueGitNexusAnalysisAsync"/> which awaits channel space.
     /// </summary>
     internal void EnqueueGitNexusAnalysis(string repoName)
+        => _ = EnqueueGitNexusAnalysisAsync(repoName);
+
+    /// <summary>
+    /// Asynchronously enqueues a GitNexus analysis, waiting for space in the bounded channel.
+    /// Using <c>WriteAsync</c> (not <c>TryWrite</c>) guarantees no requests are silently dropped
+    /// when the channel is at capacity.
+    /// </summary>
+    internal async Task EnqueueGitNexusAnalysisAsync(string repoName)
     {
-        // Channel uses Wait mode — TryWrite always succeeds unless the channel is completed
-        if (!_gitNexusQueue.Writer.TryWrite(repoName))
+        try
+        {
+            await _gitNexusQueue.Writer.WriteAsync(repoName);
+        }
+        catch (ChannelClosedException)
+        {
             _logger.LogDebug("GitNexus queue closed; analysis for '{Repo}' skipped (shutting down).", repoName);
+        }
     }
 
     /// <summary>
