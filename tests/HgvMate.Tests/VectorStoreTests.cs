@@ -209,7 +209,7 @@ public sealed class VectorStoreTests
     }
 
     [TestMethod]
-    public void ConcurrentUpserts_ThreadSafe()
+    public async Task ConcurrentUpserts_ThreadSafe()
     {
         var tasks = Enumerable.Range(0, 100).Select(i =>
             Task.Run(() =>
@@ -218,12 +218,12 @@ public sealed class VectorStoreTests
                 _store.UpsertChunk(chunk);
             }));
 
-        Task.WaitAll(tasks.ToArray());
+        await Task.WhenAll(tasks);
         Assert.AreEqual(100, _store.CachedChunkCount);
     }
 
     [TestMethod]
-    public void ConcurrentReadsAndWrites_ThreadSafe()
+    public async Task ConcurrentReadsAndWrites_ThreadSafe()
     {
         // Pre-populate
         for (int i = 0; i < 50; i++)
@@ -250,7 +250,7 @@ public sealed class VectorStoreTests
                 _store.DeleteChunksForFile("repo1", $"file{i}.cs");
         });
 
-        Task.WaitAll(writeTask, readTask, deleteTask);
+        await Task.WhenAll(writeTask, readTask, deleteTask);
         // No exceptions means thread safety held
         Assert.IsGreaterThan(0, _store.CachedChunkCount);
     }

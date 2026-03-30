@@ -125,16 +125,19 @@ public sealed class SseTransportTests : IDisposable
             Encoding.UTF8,
             "application/json");
 
-        var response = await client.PostAsync("/mcp", content);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/mcp") { Content = content };
+        request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("text/event-stream"));
+        request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+        var response = await client.SendAsync(request);
+
+        // Ensure the endpoint returns a successful status before validating content type
+        Assert.AreEqual(System.Net.HttpStatusCode.OK, response.StatusCode, "Expected /mcp to return 200 OK.");
 
         // Verify response content type is JSON-based (MCP uses application/json or text/event-stream)
-        if (response.IsSuccessStatusCode)
-        {
-            var contentType = response.Content.Headers.ContentType?.MediaType;
-            Assert.IsTrue(
-                contentType == "application/json" || contentType == "text/event-stream",
-                $"Expected JSON or SSE content type, got '{contentType}'.");
-        }
+        var contentType = response.Content.Headers.ContentType?.MediaType;
+        Assert.IsTrue(
+            contentType == "application/json" || contentType == "text/event-stream",
+            $"Expected JSON or SSE content type, got '{contentType}'.");
     }
 
     private async Task<WebApplication> CreateTestApp()

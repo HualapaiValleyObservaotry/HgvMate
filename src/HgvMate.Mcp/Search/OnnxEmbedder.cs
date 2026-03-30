@@ -290,7 +290,8 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
             httpClient.Timeout = TimeSpan.FromMinutes(10);
 
             var tempPath = downloadPath + ".download";
-            using (var response = httpClient.Send(new HttpRequestMessage(HttpMethod.Get, downloadUrl), HttpCompletionOption.ResponseHeadersRead))
+            using var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
+            using (var response = httpClient.Send(request, HttpCompletionOption.ResponseHeadersRead))
             {
                 response.EnsureSuccessStatusCode();
                 using var stream = response.Content.ReadAsStream();

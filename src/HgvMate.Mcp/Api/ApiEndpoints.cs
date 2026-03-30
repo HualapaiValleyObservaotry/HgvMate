@@ -1,4 +1,3 @@
-using System.Threading.RateLimiting;
 using HgvMate.Mcp.Configuration;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;

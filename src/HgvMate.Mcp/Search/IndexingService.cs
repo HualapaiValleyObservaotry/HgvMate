@@ -81,6 +81,9 @@ public class IndexingService
 
         // Build new chunks into a staging list first, then atomically swap (delete old + upsert new).
         // This avoids a data gap if indexing fails midway — old chunks remain searchable until success.
+        // NOTE: This temporarily holds both old (in-cache) and new chunks in memory. For very large
+        // repos this could be significant. If memory pressure becomes an issue, consider streaming
+        // chunks to a temporary on-disk store or incremental upsert-with-rollback.
         var allNewChunks = new List<SourceChunk>();
         var files = GetIndexableFiles(repoRoot);
         int fileCount = 0, chunkCount = 0, skippedCount = 0;

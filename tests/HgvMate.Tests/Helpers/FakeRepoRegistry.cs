@@ -21,11 +21,20 @@ internal class FakeRepoRegistry : IRepoRegistry
         // ConcurrentBag doesn't support removal, so rebuild
         var snapshot = _repos.ToArray();
         while (_repos.TryTake(out _)) { }
+
+        var removed = false;
         foreach (var r in snapshot)
         {
-            if (r.Name != name) _repos.Add(r);
+            if (r.Name == name)
+            {
+                removed = true;
+                continue;
+            }
+
+            _repos.Add(r);
         }
-        return Task.FromResult(true);
+
+        return Task.FromResult(removed);
     }
 
     public Task<IReadOnlyList<RepoRecord>> GetAllAsync()

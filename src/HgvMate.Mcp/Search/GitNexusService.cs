@@ -131,20 +131,19 @@ public class GitNexusService
     private bool IsGitNexusIndexed(string repoPath)
         => Directory.Exists(Path.Combine(repoPath, ".gitnexus"));
 
-    private async Task<string[]> GetAvailableReposAsync()
+    private Task<string[]> GetAvailableReposAsync()
     {
-        await Task.CompletedTask; // Satisfy async contract for future I/O operations
         var reposPath = _syncOptions.ResolveCloneRoot(_hgvMateOptions.DataPath);
         if (!Directory.Exists(reposPath))
-            return [];
+            return Task.FromResult(Array.Empty<string>());
         // Only return directories that contain a .git folder (active clones),
         // filtering out stale directories left from deregistered repos.
-        return Directory.GetDirectories(reposPath)
+        return Task.FromResult(Directory.GetDirectories(reposPath)
             .Where(d => Directory.Exists(Path.Combine(d, ".git")))
             .Select(Path.GetFileName)
             .Where(n => n != null)
             .Cast<string>()
-            .ToArray();
+            .ToArray());
     }
 
     private async Task<string> RunGitNexusCommandAsync(

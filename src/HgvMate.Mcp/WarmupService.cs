@@ -52,9 +52,16 @@ public sealed class WarmupService : BackgroundService
 
         try
         {
-            // ONNX model loads in constructor, just verify it's available
-            _startupState.MarkOnnxReady();
-            _logger.LogInformation("Warmup: ONNX embedder available={Available}.", _embedder.IsAvailable);
+            // ONNX model loads in constructor, only mark ready if it is actually available
+            if (_embedder.IsAvailable)
+            {
+                _startupState.MarkOnnxReady();
+                _logger.LogInformation("Warmup: ONNX embedder available={Available}.", _embedder.IsAvailable);
+            }
+            else
+            {
+                _logger.LogWarning("Warmup: ONNX embedder is not available. Semantic search may be unavailable.");
+            }
         }
         catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
         {
