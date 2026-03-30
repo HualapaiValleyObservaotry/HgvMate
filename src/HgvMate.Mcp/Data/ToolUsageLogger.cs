@@ -304,10 +304,12 @@ public sealed class ToolUsageLogger : IDisposable
 
     public void Dispose()
     {
-        _cts.Cancel();
+        try { _cts.Cancel(); }
+        catch (ObjectDisposedException) { /* already disposed */ }
         _channel.Writer.TryComplete();
         try { _consumerTask?.GetAwaiter().GetResult(); }
         catch (OperationCanceledException) { /* expected */ }
+        catch (ObjectDisposedException) { /* expected */ }
         _cts.Dispose();
     }
 }
