@@ -428,6 +428,35 @@ public class RepoSyncService : BackgroundService
     }
 
     /// <summary>
+    /// Re-index only the ONNX vector embeddings for a single repository without pulling new code.
+    /// </summary>
+    public virtual async Task ReindexVectorsAsync(RepoRecord repo, CancellationToken cancellationToken = default)
+    {
+        var clonePath = GetClonePath(repo.Name);
+        if (!Directory.Exists(Path.Combine(clonePath, ".git")))
+            throw new DirectoryNotFoundException($"Repository '{repo.Name}' is not cloned yet.");
+
+        _logger.LogInformation("Vector-only reindex for '{Name}'...", repo.Name);
+        await _indexingService.IndexRepoAsync(repo.Name, deferSave: false, cancellationToken);
+        await _indexingService.SaveVectorStoreAsync();
+        _logger.LogInformation("Vector-only reindex complete for '{Name}'.", repo.Name);
+    }
+
+    /// <summary>
+    /// Re-run only the GitNexus structural analysis for a single repository without pulling new code.
+    /// </summary>
+    public virtual async Task ReindexGitNexusAsync(RepoRecord repo, CancellationToken cancellationToken = default)
+    {
+        var clonePath = GetClonePath(repo.Name);
+        if (!Directory.Exists(Path.Combine(clonePath, ".git")))
+            throw new DirectoryNotFoundException($"Repository '{repo.Name}' is not cloned yet.");
+
+        _logger.LogInformation("GitNexus-only reindex for '{Name}'...", repo.Name);
+        await _gitNexusService.AnalyzeAsync(repo.Name, cancellationToken);
+        _logger.LogInformation("GitNexus-only reindex complete for '{Name}'.", repo.Name);
+    }
+
+    /// <summary>
     /// Updates the last-known SHA for a repo. During bulk sync, defers the registry write by
     /// storing the SHA in <paramref name="deferredShas"/> (applied after the vector store flush).
     /// </summary>

@@ -111,11 +111,18 @@ public class AdminTools
     }
 
     [McpServerTool(Name = "hgvmate_reindex")]
-    [Description("Trigger an immediate sync and re-index for one or all repositories.")]
+    [Description("Trigger an immediate sync and re-index for one or all repositories. " +
+                 "Scope: 'all' (default) = git pull + vectors + GitNexus, 'vectors' = ONNX embeddings only, 'gitnexus' = structural analysis only.")]
     public async Task<string> Reindex(
-        [Description("Repository name to reindex, or omit for all repositories")] string? repository = null)
+        [Description("Repository name to reindex, or omit for all repositories")] string? repository = null,
+        [Description("Reindex scope: 'all' (default, full sync), 'vectors' (ONNX embeddings only), 'gitnexus' (structural analysis only)")] string scope = "all")
     {
         HgvMateDiagnostics.RecordToolCall("reindex");
+
+        var validScopes = new[] { "all", "vectors", "gitnexus" };
+        if (!validScopes.Contains(scope, StringComparer.OrdinalIgnoreCase))
+            return $"Error: scope must be one of: {string.Join(", ", validScopes)}.";
+
         try
         {
             if (!string.IsNullOrWhiteSpace(repository))
@@ -123,15 +130,33 @@ public class AdminTools
                 var repo = await _registry.GetByNameAsync(repository);
                 if (repo == null)
                     return $"Error: Repository '{repository}' not found.";
+
                 _ = Task.Run(async () =>
                 {
-                    try { await _syncService.SyncRepoAsync(repo); }
+                    try
+                    {
+                        switch (scope.ToLowerInvariant())
+                        {
+                            case "vectors":
+                                await _syncService.ReindexVectorsAsync(repo);
+                                break;
+                            case "gitnexus":
+                                await _syncService.ReindexGitNexusAsync(repo);
+                                break;
+                            default:
+                                await _syncService.SyncRepoAsync(repo);
+                                break;
+                        }
+                    }
                     catch (Exception ex) { _logger.LogError(ex, "Background reindex failed for '{Name}'.", repo.Name); }
                 });
-                return $"Reindex triggered for '{repository}'.";
+                return $"Reindex triggered for '{repository}' (scope: {scope}).";
             }
             else
             {
+                if (!scope.Equals("all", StringComparison.OrdinalIgnoreCase))
+                    return "Error: scope 'vectors' and 'gitnexus' require a specific repository name.";
+
                 _ = Task.Run(async () =>
                 {
                     try { await _syncService.SyncAllAsync(); }

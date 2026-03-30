@@ -118,6 +118,64 @@ public sealed class AdminToolsTests
         StringAssert.Contains(result, "added");
     }
 
+    // ── Reindex ─────────────────────────────────────────────────────────
+
+    [TestMethod]
+    public async Task Reindex_SpecificRepo_DefaultScope_ReturnsTriggered()
+    {
+        await _registry.AddAsync("myrepo", "https://github.com/org/myrepo", "main", "github");
+        var result = await _tools.Reindex("myrepo");
+        StringAssert.Contains(result, "Reindex triggered");
+        StringAssert.Contains(result, "scope: all");
+    }
+
+    [TestMethod]
+    public async Task Reindex_SpecificRepo_VectorsScope_ReturnsTriggered()
+    {
+        await _registry.AddAsync("myrepo", "https://github.com/org/myrepo", "main", "github");
+        var result = await _tools.Reindex("myrepo", scope: "vectors");
+        StringAssert.Contains(result, "scope: vectors");
+    }
+
+    [TestMethod]
+    public async Task Reindex_SpecificRepo_GitNexusScope_ReturnsTriggered()
+    {
+        await _registry.AddAsync("myrepo", "https://github.com/org/myrepo", "main", "github");
+        var result = await _tools.Reindex("myrepo", scope: "gitnexus");
+        StringAssert.Contains(result, "scope: gitnexus");
+    }
+
+    [TestMethod]
+    public async Task Reindex_InvalidScope_ReturnsError()
+    {
+        await _registry.AddAsync("myrepo", "https://github.com/org/myrepo", "main", "github");
+        var result = await _tools.Reindex("myrepo", scope: "invalid");
+        StringAssert.Contains(result, "Error");
+        StringAssert.Contains(result, "scope must be one of");
+    }
+
+    [TestMethod]
+    public async Task Reindex_AllRepos_DefaultScope_ReturnsTriggered()
+    {
+        var result = await _tools.Reindex();
+        StringAssert.Contains(result, "Reindex triggered for all");
+    }
+
+    [TestMethod]
+    public async Task Reindex_AllRepos_VectorsScope_ReturnsError()
+    {
+        var result = await _tools.Reindex(scope: "vectors");
+        StringAssert.Contains(result, "Error");
+        StringAssert.Contains(result, "require a specific repository");
+    }
+
+    [TestMethod]
+    public async Task Reindex_NonExistentRepo_ReturnsError()
+    {
+        var result = await _tools.Reindex("nonexistent");
+        StringAssert.Contains(result, "not found");
+    }
+
     private sealed class FakeRepoRegistry : IRepoRegistry
     {
         private readonly List<RepoRecord> _repos = [];
@@ -219,6 +277,12 @@ public sealed class AdminToolsTests
             => Task.CompletedTask;
 
         public override Task SyncAllAsync(CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public override Task ReindexVectorsAsync(RepoRecord repo, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public override Task ReindexGitNexusAsync(RepoRecord repo, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
     }
 
