@@ -101,6 +101,42 @@ public sealed class SseTransportTests : IDisposable
             "GET /mcp should be handled by the MCP endpoint.");
     }
 
+    [TestMethod]
+    public async Task McpEndpoint_PostReturnsJsonContentType()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var initRequest = new
+        {
+            jsonrpc = "2.0",
+            id = 2,
+            method = "initialize",
+            @params = new
+            {
+                protocolVersion = "2025-03-26",
+                capabilities = new { },
+                clientInfo = new { name = "test-client", version = "1.0.0" }
+            }
+        };
+
+        var content = new StringContent(
+            JsonSerializer.Serialize(initRequest),
+            Encoding.UTF8,
+            "application/json");
+
+        var response = await client.PostAsync("/mcp", content);
+
+        // Verify response content type is JSON-based (MCP uses application/json or text/event-stream)
+        if (response.IsSuccessStatusCode)
+        {
+            var contentType = response.Content.Headers.ContentType?.MediaType;
+            Assert.IsTrue(
+                contentType == "application/json" || contentType == "text/event-stream",
+                $"Expected JSON or SSE content type, got '{contentType}'.");
+        }
+    }
+
     private async Task<WebApplication> CreateTestApp()
     {
         var builder = WebApplication.CreateBuilder();

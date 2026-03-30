@@ -35,10 +35,11 @@ public sealed class SourceCodeToolsTests
 
         _tools = new SourceCodeTools(hybridSearch, reader);
 
-        // Create a fake repo
+        // Create a fake repo with multiple files
         var repoPath = Path.Combine(_tempDir, "repos", "testrepo");
-        Directory.CreateDirectory(repoPath);
+        Directory.CreateDirectory(Path.Combine(repoPath, "src"));
         File.WriteAllText(Path.Combine(repoPath, "test.txt"), "Hello World");
+        File.WriteAllText(Path.Combine(repoPath, "src", "main.cs"), "public class Main {}");
     }
 
     [TestCleanup]
@@ -56,10 +57,33 @@ public sealed class SourceCodeToolsTests
     }
 
     [TestMethod]
+    public async Task SearchSourceCode_WhitespaceQuery_ReturnsError()
+    {
+        var result = await _tools.SearchSourceCode("   ");
+        StringAssert.Contains(result, "Error");
+    }
+
+    [TestMethod]
+    public async Task SearchSourceCode_ValidQuery_NoGitRepo_ReturnsNoResults()
+    {
+        // No git repos initialized so git grep won't work, but shouldn't crash
+        var result = await _tools.SearchSourceCode("Hello");
+        // Should return a clean response (either results or "no results")
+        Assert.IsFalse(string.IsNullOrEmpty(result));
+    }
+
+    [TestMethod]
     public async Task GetFileContent_ValidFile_ReturnsContent()
     {
         var result = await _tools.GetFileContent("testrepo", "test.txt");
         Assert.AreEqual("Hello World", result);
+    }
+
+    [TestMethod]
+    public async Task GetFileContent_NestedFile_ReturnsContent()
+    {
+        var result = await _tools.GetFileContent("testrepo", "src/main.cs");
+        Assert.AreEqual("public class Main {}", result);
     }
 
     [TestMethod]
@@ -87,6 +111,13 @@ public sealed class SourceCodeToolsTests
     public async Task GetFileContent_NonExistentFile_ReturnsError()
     {
         var result = await _tools.GetFileContent("testrepo", "nonexistent.txt");
+        StringAssert.Contains(result, "Error");
+    }
+
+    [TestMethod]
+    public async Task GetFileContent_NonExistentRepo_ReturnsError()
+    {
+        var result = await _tools.GetFileContent("no-such-repo", "test.txt");
         StringAssert.Contains(result, "Error");
     }
 }

@@ -207,4 +207,69 @@ public sealed class VectorStoreTests
         Assert.IsTrue(store.IsCacheLoaded);
         Assert.AreEqual(0, store.CachedChunkCount);
     }
+
+    [TestMethod]
+    public void ConcurrentUpserts_ThreadSafe()
+    {
+        var tasks = Enumerable.Range(0, 100).Select(i =>
+            Task.Run(() =>
+            {
+                var chunk = new SourceChunk($"repo{i % 5}", $"file{i}.cs", 0, $"content {i}", new float[384]);
+                _store.UpsertChunk(chunk);
+            }));
+
+        Task.WaitAll(tasks.ToArray());
+        Assert.AreEqual(100, _store.CachedChunkCount);
+    }
+
+    [TestMethod]
+    public void ConcurrentReadsAndWrites_ThreadSafe()
+    {
+        // Pre-populate
+        for (int i = 0; i < 50; i++)
+            _store.UpsertChunk(new SourceChunk("repo1", $"file{i}.cs", 0, $"content {i}", new float[384]));
+
+        var writeTask = Task.Run(() =>
+        {
+            for (int i = 50; i < 100; i++)
+                _store.UpsertChunk(new SourceChunk("repo1", $"file{i}.cs", 0, $"content {i}", new float[384]));
+        });
+
+        var readTask = Task.Run(() =>
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                var results = _store.Search(new float[384], "repo1", 10);
+                Assert.IsLessThanOrEqualTo(10, results.Count);
+            }
+        });
+
+        var deleteTask = Task.Run(() =>
+        {
+            for (int i = 0; i < 10; i++)
+                _store.DeleteChunksForFile("repo1", $"file{i}.cs");
+        });
+
+        Task.WaitAll(writeTask, readTask, deleteTask);
+        // No exceptions means thread safety held
+        Assert.IsGreaterThan(0, _store.CachedChunkCount);
+    }
+
+    [TestMethod]
+    public async Task ConcurrentSaves_ThreadSafe()
+    {
+        _store.UpsertChunks([
+            new SourceChunk("repo1", "f1.cs", 0, "c1", new float[384]),
+            new SourceChunk("repo1", "f2.cs", 0, "c2", new float[384]),
+        ]);
+
+        // Multiple concurrent saves should not corrupt the file
+        var saveTasks = Enumerable.Range(0, 5).Select(_ => _store.SaveAsync());
+        await Task.WhenAll(saveTasks);
+
+        // Verify data integrity after concurrent saves
+        var store2 = new VectorStore(Path.Combine(_tempDir, "vectors.bin"), NullLogger<VectorStore>.Instance);
+        await store2.LoadAsync();
+        Assert.AreEqual(2, store2.CachedChunkCount);
+    }
 }
