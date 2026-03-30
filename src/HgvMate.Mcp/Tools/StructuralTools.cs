@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Search;
 using ModelContextProtocol.Server;
 using System.ComponentModel;
@@ -8,10 +10,12 @@ namespace HgvMate.Mcp.Tools;
 public class StructuralTools
 {
     private readonly GitNexusService _gitNexus;
+    private readonly ToolUsageLogger _usageLogger;
 
-    public StructuralTools(GitNexusService gitNexus)
+    public StructuralTools(GitNexusService gitNexus, ToolUsageLogger usageLogger)
     {
         _gitNexus = gitNexus;
+        _usageLogger = usageLogger;
     }
 
     [McpServerTool(Name = "hgvmate_find_symbol")]
@@ -21,16 +25,26 @@ public class StructuralTools
         [Description("Limit to specific repository (optional)")] string? repository = null)
     {
         HgvMateDiagnostics.RecordToolCall("find_symbol");
-        if (string.IsNullOrWhiteSpace(name))
-            return "Error: name is required.";
-
+        var sw = Stopwatch.StartNew();
+        string? error = null;
         try
         {
-            return await _gitNexus.FindSymbolAsync(name, repository);
+            if (string.IsNullOrWhiteSpace(name))
+                return "Error: name is required.";
+
+            try
+            {
+                return await _gitNexus.FindSymbolAsync(name, repository);
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return $"Error finding symbol: {ex.Message}";
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            return $"Error finding symbol: {ex.Message}";
+            _usageLogger.Log("hgvmate_find_symbol", new { name, repository }, sw.Elapsed.TotalMilliseconds, error: error);
         }
     }
 
@@ -41,16 +55,26 @@ public class StructuralTools
         [Description("Limit to specific repository (optional)")] string? repository = null)
     {
         HgvMateDiagnostics.RecordToolCall("get_references");
-        if (string.IsNullOrWhiteSpace(name))
-            return "Error: name is required.";
-
+        var sw = Stopwatch.StartNew();
+        string? error = null;
         try
         {
-            return await _gitNexus.GetReferencesAsync(name, repository);
+            if (string.IsNullOrWhiteSpace(name))
+                return "Error: name is required.";
+
+            try
+            {
+                return await _gitNexus.GetReferencesAsync(name, repository);
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return $"Error getting references: {ex.Message}";
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            return $"Error getting references: {ex.Message}";
+            _usageLogger.Log("hgvmate_get_references", new { name, repository }, sw.Elapsed.TotalMilliseconds, error: error);
         }
     }
 
@@ -61,16 +85,26 @@ public class StructuralTools
         [Description("Limit to specific repository (optional)")] string? repository = null)
     {
         HgvMateDiagnostics.RecordToolCall("get_call_chain");
-        if (string.IsNullOrWhiteSpace(name))
-            return "Error: name is required.";
-
+        var sw = Stopwatch.StartNew();
+        string? error = null;
         try
         {
-            return await _gitNexus.GetCallChainAsync(name, repository);
+            if (string.IsNullOrWhiteSpace(name))
+                return "Error: name is required.";
+
+            try
+            {
+                return await _gitNexus.GetCallChainAsync(name, repository);
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return $"Error getting call chain: {ex.Message}";
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            return $"Error getting call chain: {ex.Message}";
+            _usageLogger.Log("hgvmate_get_call_chain", new { name, repository }, sw.Elapsed.TotalMilliseconds, error: error);
         }
     }
 
@@ -81,16 +115,26 @@ public class StructuralTools
         [Description("Limit to specific repository (optional)")] string? repository = null)
     {
         HgvMateDiagnostics.RecordToolCall("get_impact");
-        if (string.IsNullOrWhiteSpace(name))
-            return "Error: name is required.";
-
+        var sw = Stopwatch.StartNew();
+        string? error = null;
         try
         {
-            return await _gitNexus.GetImpactAsync(name, repository);
+            if (string.IsNullOrWhiteSpace(name))
+                return "Error: name is required.";
+
+            try
+            {
+                return await _gitNexus.GetImpactAsync(name, repository);
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return $"Error getting impact: {ex.Message}";
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            return $"Error getting impact: {ex.Message}";
+            _usageLogger.Log("hgvmate_get_impact", new { name, repository }, sw.Elapsed.TotalMilliseconds, error: error);
         }
     }
 }

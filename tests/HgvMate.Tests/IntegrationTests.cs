@@ -2,6 +2,7 @@ using HgvMate.Mcp.Configuration;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
 using HgvMate.Mcp.Tools;
+using HgvMate.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HgvMate.Tests;
@@ -74,7 +75,7 @@ public sealed class IntegrationTests
 
         var gitGrep = new GitGrepSearchService(registry, reader, searchOptions, NullLogger<GitGrepSearchService>.Instance);
         var hybridSearch = new HybridSearchService(gitGrep, vectorStore, embedder, searchOptions, NullLogger<HybridSearchService>.Instance);
-        var sourceTools = new SourceCodeTools(hybridSearch, reader);
+        var sourceTools = new SourceCodeTools(hybridSearch, reader, TestToolUsageLogger.Create(_tempDir));
 
         // ── 3. Register the repo ───────────────────────────────────────────
         await registry.AddAsync("greeter", repoUrl, "main", "local");

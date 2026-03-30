@@ -1,7 +1,9 @@
 using HgvMate.Mcp.Configuration;
+using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
 using HgvMate.Mcp.Tools;
+using HgvMate.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HgvMate.Tests;
@@ -18,7 +20,7 @@ public sealed class AdminToolsTests
     {
         _registry = new FakeRepoRegistry();
         _syncService = new FakeRepoSyncService(_registry);
-        _tools = new AdminTools(_registry, _syncService, NullLogger<AdminTools>.Instance);
+        _tools = new AdminTools(_registry, _syncService, NullLogger<AdminTools>.Instance, TestToolUsageLogger.Create());
     }
 
     [TestMethod]

@@ -1,4 +1,5 @@
 using HgvMate.Mcp.Configuration;
+using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Search;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -14,17 +15,20 @@ public sealed class WarmupService : BackgroundService
 {
     private readonly VectorStore _vectorStore;
     private readonly IOnnxEmbedder _embedder;
+    private readonly ToolUsageLogger _usageLogger;
     private readonly StartupState _startupState;
     private readonly ILogger<WarmupService> _logger;
 
     public WarmupService(
         VectorStore vectorStore,
         IOnnxEmbedder embedder,
+        ToolUsageLogger usageLogger,
         StartupState startupState,
         ILogger<WarmupService> logger)
     {
         _vectorStore = vectorStore;
         _embedder = embedder;
+        _usageLogger = usageLogger;
         _startupState = startupState;
         _logger = logger;
     }
@@ -36,6 +40,10 @@ public sealed class WarmupService : BackgroundService
 
         try
         {
+            // Initialize tool usage logger (SQLite schema + prune old records)
+            await _usageLogger.InitializeAsync(stoppingToken);
+            _logger.LogInformation("Warmup: tool usage logger initialized.");
+
             // No database initialization needed — repo metadata is stored as JSON files
             _startupState.MarkDatabaseReady();
 

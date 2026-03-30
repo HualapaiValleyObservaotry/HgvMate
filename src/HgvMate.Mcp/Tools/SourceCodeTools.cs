@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Search;
 using ModelContextProtocol.Server;
 using System.ComponentModel;
@@ -10,11 +12,13 @@ public class SourceCodeTools
 {
     private readonly HybridSearchService _hybridSearch;
     private readonly SourceCodeReader _reader;
+    private readonly ToolUsageLogger _usageLogger;
 
-    public SourceCodeTools(HybridSearchService hybridSearch, SourceCodeReader reader)
+    public SourceCodeTools(HybridSearchService hybridSearch, SourceCodeReader reader, ToolUsageLogger usageLogger)
     {
         _hybridSearch = hybridSearch;
         _reader = reader;
+        _usageLogger = usageLogger;
     }
 
     [McpServerTool(Name = "hgvmate_search_source_code")]
@@ -26,34 +30,46 @@ public class SourceCodeTools
         [Description("Comma-separated glob patterns to exclude, e.g. '*.min.js,package-lock.json' (optional)")] string? excludePatterns = null)
     {
         HgvMateDiagnostics.RecordToolCall("search_source_code");
-        if (string.IsNullOrWhiteSpace(query))
-            return "Error: query is required.";
-
+        var sw = Stopwatch.StartNew();
+        string? error = null;
+        int? resultCount = null;
         try
         {
-            var extensions = string.IsNullOrWhiteSpace(includeExtensions)
-                ? null
-                : includeExtensions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            var excludes = string.IsNullOrWhiteSpace(excludePatterns)
-                ? null
-                : excludePatterns.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (string.IsNullOrWhiteSpace(query))
+                return "Error: query is required.";
 
-            var results = await _hybridSearch.SearchAsync(query, repository, extensions, excludes);
-            if (!results.Any())
-                return $"No results found for query: '{query}'.";
-
-            var sb = new StringBuilder();
-            sb.AppendLine($"Search results for '{query}':");
-            foreach (var result in results)
+            try
             {
-                sb.AppendLine($"\n[{result.RepoName}] {result.FilePath}:{result.LineNumber}");
-                sb.AppendLine($"  {result.LineContent.Trim()}");
+                var extensions = string.IsNullOrWhiteSpace(includeExtensions)
+                    ? null
+                    : includeExtensions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var excludes = string.IsNullOrWhiteSpace(excludePatterns)
+                    ? null
+                    : excludePatterns.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+                var results = await _hybridSearch.SearchAsync(query, repository, extensions, excludes);
+                resultCount = results.Count;
+                if (!results.Any())
+                    return $"No results found for query: '{query}'.";
+
+                var sb = new StringBuilder();
+                sb.AppendLine($"Search results for '{query}':");
+                foreach (var result in results)
+                {
+                    sb.AppendLine($"\n[{result.RepoName}] {result.FilePath}:{result.LineNumber}");
+                    sb.AppendLine($"  {result.LineContent.Trim()}");
+                }
+                return sb.ToString();
             }
-            return sb.ToString();
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return $"Error searching source code: {ex.Message}";
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            return $"Error searching source code: {ex.Message}";
+            _usageLogger.Log("hgvmate_search_source_code", new { query, repository, includeExtensions, excludePatterns }, sw.Elapsed.TotalMilliseconds, resultCount: resultCount, error: error);
         }
     }
 
@@ -64,26 +80,38 @@ public class SourceCodeTools
         [Description("Relative path to the file within the repository (e.g., 'src/Program.cs')")] string path)
     {
         HgvMateDiagnostics.RecordToolCall("get_file_content");
-        if (string.IsNullOrWhiteSpace(repository))
-            return "Error: repository is required.";
-        if (string.IsNullOrWhiteSpace(path))
-            return "Error: path is required.";
-
+        var sw = Stopwatch.StartNew();
+        string? error = null;
         try
         {
-            return await _reader.GetFileAsync(repository, path);
+            if (string.IsNullOrWhiteSpace(repository))
+                return "Error: repository is required.";
+            if (string.IsNullOrWhiteSpace(path))
+                return "Error: path is required.";
+
+            try
+            {
+                return await _reader.GetFileAsync(repository, path);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                error = ex.Message;
+                return $"Error: {ex.Message}";
+            }
+            catch (FileNotFoundException ex)
+            {
+                error = ex.Message;
+                return $"Error: {ex.Message}";
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return $"Error reading file: {ex.Message}";
+            }
         }
-        catch (UnauthorizedAccessException ex)
+        finally
         {
-            return $"Error: {ex.Message}";
-        }
-        catch (FileNotFoundException ex)
-        {
-            return $"Error: {ex.Message}";
-        }
-        catch (Exception ex)
-        {
-            return $"Error reading file: {ex.Message}";
+            _usageLogger.Log("hgvmate_get_file_content", new { repository, path }, sw.Elapsed.TotalMilliseconds, error: error);
         }
     }
 
@@ -96,38 +124,52 @@ public class SourceCodeTools
         [Description("Maximum folder depth to expand (default: 2, max: 10)")] int depth = 2)
     {
         HgvMateDiagnostics.RecordToolCall("get_repo_tree");
-        if (string.IsNullOrWhiteSpace(repository))
-            return "Error: repository is required.";
-        if (depth < 1 || depth > 10)
-            return "Error: depth must be between 1 and 10.";
-
+        var sw = Stopwatch.StartNew();
+        string? error = null;
+        int? resultCount = null;
         try
         {
-            var entries = await _reader.GetRepoTreeAsync(repository, path, depth);
-            if (!entries.Any())
-                return $"No files found{(string.IsNullOrWhiteSpace(path) ? "" : $" under '{path}'")} in repository '{repository}'.";
+            if (string.IsNullOrWhiteSpace(repository))
+                return "Error: repository is required.";
+            if (depth < 1 || depth > 10)
+                return "Error: depth must be between 1 and 10.";
 
-            var header = string.IsNullOrWhiteSpace(path)
-                ? $"File tree for '{repository}' (depth={depth}):"
-                : $"File tree for '{repository}/{path}' (depth={depth}):";
+            try
+            {
+                var entries = await _reader.GetRepoTreeAsync(repository, path, depth);
+                resultCount = entries.Count;
+                if (!entries.Any())
+                    return $"No files found{(string.IsNullOrWhiteSpace(path) ? "" : $" under '{path}'")} in repository '{repository}'.";
 
-            var sb = new StringBuilder();
-            sb.AppendLine(header);
-            foreach (var entry in entries)
-                sb.AppendLine($"  {entry}");
-            return sb.ToString();
+                var header = string.IsNullOrWhiteSpace(path)
+                    ? $"File tree for '{repository}' (depth={depth}):"
+                    : $"File tree for '{repository}/{path}' (depth={depth}):";
+
+                var sb = new StringBuilder();
+                sb.AppendLine(header);
+                foreach (var entry in entries)
+                    sb.AppendLine($"  {entry}");
+                return sb.ToString();
+            }
+            catch (DirectoryNotFoundException ex)
+            {
+                error = ex.Message;
+                return $"Error: {ex.Message}";
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                error = ex.Message;
+                return $"Error: {ex.Message}";
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return $"Error getting repo tree: {ex.Message}";
+            }
         }
-        catch (DirectoryNotFoundException ex)
+        finally
         {
-            return $"Error: {ex.Message}";
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return $"Error: {ex.Message}";
-        }
-        catch (Exception ex)
-        {
-            return $"Error getting repo tree: {ex.Message}";
+            _usageLogger.Log("hgvmate_get_repo_tree", new { repository, path, depth }, sw.Elapsed.TotalMilliseconds, resultCount: resultCount, error: error);
         }
     }
 
@@ -140,30 +182,43 @@ public class SourceCodeTools
         [Description("Glob pattern to match file names, e.g. '*.cs', '*Controller.cs', 'package.json'")] string pattern)
     {
         HgvMateDiagnostics.RecordToolCall("find_files");
-        if (string.IsNullOrWhiteSpace(repository))
-            return "Error: repository is required.";
-        if (string.IsNullOrWhiteSpace(pattern))
-            return "Error: pattern is required.";
-
+        var sw = Stopwatch.StartNew();
+        string? error = null;
+        int? resultCount = null;
         try
         {
-            var files = await _reader.FindFilesAsync(repository, pattern);
-            if (!files.Any())
-                return $"No files matching '{pattern}' found in repository '{repository}'.";
+            if (string.IsNullOrWhiteSpace(repository))
+                return "Error: repository is required.";
+            if (string.IsNullOrWhiteSpace(pattern))
+                return "Error: pattern is required.";
 
-            var sb = new StringBuilder();
-            sb.AppendLine($"Files matching '{pattern}' in '{repository}' ({files.Count} result(s)):");
-            foreach (var file in files)
-                sb.AppendLine($"  {file}");
-            return sb.ToString();
+            try
+            {
+                var files = await _reader.FindFilesAsync(repository, pattern);
+                resultCount = files.Count;
+                if (!files.Any())
+                    return $"No files matching '{pattern}' found in repository '{repository}'.";
+
+                var sb = new StringBuilder();
+                sb.AppendLine($"Files matching '{pattern}' in '{repository}' ({files.Count} result(s)):");
+                foreach (var file in files)
+                    sb.AppendLine($"  {file}");
+                return sb.ToString();
+            }
+            catch (DirectoryNotFoundException ex)
+            {
+                error = ex.Message;
+                return $"Error: {ex.Message}";
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return $"Error finding files: {ex.Message}";
+            }
         }
-        catch (DirectoryNotFoundException ex)
+        finally
         {
-            return $"Error: {ex.Message}";
-        }
-        catch (Exception ex)
-        {
-            return $"Error finding files: {ex.Message}";
+            _usageLogger.Log("hgvmate_find_files", new { repository, pattern }, sw.Elapsed.TotalMilliseconds, resultCount: resultCount, error: error);
         }
     }
 
@@ -175,25 +230,36 @@ public class SourceCodeTools
         [Description("Name of the repository")] string repository)
     {
         HgvMateDiagnostics.RecordToolCall("get_techstack");
-        if (string.IsNullOrWhiteSpace(repository))
-            return "Error: repository is required.";
-
+        var sw = Stopwatch.StartNew();
+        string? error = null;
         try
         {
-            return await _reader.GetFileAsync(repository, ".hgvmate/techstack.yml");
+            if (string.IsNullOrWhiteSpace(repository))
+                return "Error: repository is required.";
+
+            try
+            {
+                return await _reader.GetFileAsync(repository, ".hgvmate/techstack.yml");
+            }
+            catch (FileNotFoundException)
+            {
+                return $"No techstack.yml found for repository '{repository}'. " +
+                       "Create '.hgvmate/techstack.yml' in the repo root and commit it to enable this feature.";
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                error = ex.Message;
+                return $"Error: {ex.Message}";
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return $"Error getting techstack: {ex.Message}";
+            }
         }
-        catch (FileNotFoundException)
+        finally
         {
-            return $"No techstack.yml found for repository '{repository}'. " +
-                   "Create '.hgvmate/techstack.yml' in the repo root and commit it to enable this feature.";
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return $"Error: {ex.Message}";
-        }
-        catch (Exception ex)
-        {
-            return $"Error getting techstack: {ex.Message}";
+            _usageLogger.Log("hgvmate_get_techstack", new { repository }, sw.Elapsed.TotalMilliseconds, error: error);
         }
     }
 }

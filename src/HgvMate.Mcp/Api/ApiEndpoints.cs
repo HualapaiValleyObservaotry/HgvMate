@@ -1,4 +1,5 @@
 using HgvMate.Mcp.Configuration;
+using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
 using HVO.Enterprise.Telemetry.Abstractions;
@@ -17,6 +18,7 @@ public static class ApiEndpoints
 
         MapHealthEndpoint(app);
         MapDiagnosticsEndpoint(app);
+        MapUsageEndpoints(api);
         MapRepositoryEndpoints(api);
         MapSearchEndpoints(api);
         MapStructuralEndpoints(api);
@@ -483,6 +485,90 @@ public static class ApiEndpoints
             return Results.Ok(new { symbol = name, repository, result });
         })
         .WithSummary("Get the blast radius for a symbol");
+    }
+
+    // ── Usage Analytics ────────────────────────────────────────────────
+
+    private static void MapUsageEndpoints(RouteGroupBuilder api)
+    {
+        var usage = api.MapGroup("/diagnostics/usage").WithTags("Diagnostics");
+
+        usage.MapGet("/", async (ToolUsageLogger usageLogger, string? from, string? to) =>
+        {
+            DateTime? fromDate = null, toDate = null;
+            if (!string.IsNullOrWhiteSpace(from))
+            {
+                if (!DateTime.TryParse(from, out var fd))
+                    return Results.Problem(detail: "'from' must be a valid ISO 8601 date.", statusCode: StatusCodes.Status400BadRequest);
+                fromDate = fd;
+            }
+            if (!string.IsNullOrWhiteSpace(to))
+            {
+                if (!DateTime.TryParse(to, out var td))
+                    return Results.Problem(detail: "'to' must be a valid ISO 8601 date.", statusCode: StatusCodes.Status400BadRequest);
+                toDate = td;
+            }
+
+            var summaries = await usageLogger.GetToolSummariesAsync(fromDate, toDate);
+            var errorRates = await usageLogger.GetErrorRatesAsync(fromDate, toDate);
+
+            return Results.Ok(new
+            {
+                tools = summaries.Select(s => new
+                {
+                    s.ToolName,
+                    s.Calls,
+                    s.AvgDurationMs,
+                    s.MaxDurationMs,
+                    s.ErrorCount
+                }),
+                errorRates = errorRates.Select(e => new
+                {
+                    e.ToolName,
+                    e.TotalCalls,
+                    e.Errors,
+                    e.ErrorPercent
+                })
+            });
+        })
+        .WithSummary("Tool usage summary — call counts, durations, and error rates");
+
+        usage.MapGet("/patterns", async (ToolUsageLogger usageLogger, string? from, string? to) =>
+        {
+            DateTime? fromDate = null, toDate = null;
+            if (!string.IsNullOrWhiteSpace(from))
+            {
+                if (!DateTime.TryParse(from, out var fd))
+                    return Results.Problem(detail: "'from' must be a valid ISO 8601 date.", statusCode: StatusCodes.Status400BadRequest);
+                fromDate = fd;
+            }
+            if (!string.IsNullOrWhiteSpace(to))
+            {
+                if (!DateTime.TryParse(to, out var td))
+                    return Results.Problem(detail: "'to' must be a valid ISO 8601 date.", statusCode: StatusCodes.Status400BadRequest);
+                toDate = td;
+            }
+
+            var repeatedSearches = await usageLogger.GetRepeatedSearchesAsync(fromDate, toDate);
+            var sequences = await usageLogger.GetToolSequencesAsync(fromDate, toDate);
+
+            return Results.Ok(new
+            {
+                repeatedSearches = repeatedSearches.Select(r => new
+                {
+                    r.SessionId,
+                    r.Query,
+                    r.RepoCount
+                }),
+                toolSequences = sequences.Select(s => new
+                {
+                    s.FromTool,
+                    s.ToTool,
+                    s.Count
+                })
+            });
+        })
+        .WithSummary("Detected usage patterns — repeated queries, tool sequences");
     }
 
     // ── Diagnostics (telemetry statistics) ───────────────────────────────

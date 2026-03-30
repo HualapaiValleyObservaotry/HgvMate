@@ -1,6 +1,7 @@
 using HgvMate.Mcp;
 using HgvMate.Mcp.Api;
 using HgvMate.Mcp.Configuration;
+using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
 using HgvMate.Mcp.Tools;
@@ -62,7 +63,8 @@ if (useSse)
         .WithHttpTransport()
         .WithTools<AdminTools>()
         .WithTools<SourceCodeTools>()
-        .WithTools<StructuralTools>();
+        .WithTools<StructuralTools>()
+        .WithTools<UsageReportTools>();
 
     var app = builder.Build();
 
@@ -132,7 +134,8 @@ else
         .WithStdioServerTransport()
         .WithTools<AdminTools>()
         .WithTools<SourceCodeTools>()
-        .WithTools<StructuralTools>();
+        .WithTools<StructuralTools>()
+        .WithTools<UsageReportTools>();
 
     var app = builder.Build();
 
@@ -223,6 +226,9 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
 
     // ── Data + Services ─────────────────────────────────────────────────
     services.AddSingleton<IGitCredentialProvider, GitCredentialProvider>();
+
+    services.AddSingleton(sp =>
+        new ToolUsageLogger(dataPath, sp.GetRequiredService<ILogger<ToolUsageLogger>>()));
 
     services.AddSingleton<StartupState>();
     services.AddHostedService<WarmupService>();

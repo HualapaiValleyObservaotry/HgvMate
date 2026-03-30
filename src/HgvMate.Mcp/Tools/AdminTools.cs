@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
@@ -11,12 +13,14 @@ public class AdminTools
     private readonly IRepoRegistry _registry;
     private readonly RepoSyncService _syncService;
     private readonly ILogger<AdminTools> _logger;
+    private readonly ToolUsageLogger _usageLogger;
 
-    public AdminTools(IRepoRegistry registry, RepoSyncService syncService, ILogger<AdminTools> logger)
+    public AdminTools(IRepoRegistry registry, RepoSyncService syncService, ILogger<AdminTools> logger, ToolUsageLogger usageLogger)
     {
         _registry = registry;
         _syncService = syncService;
         _logger = logger;
+        _usageLogger = usageLogger;
     }
 
     [McpServerTool(Name = "hgvmate_add_repository")]
@@ -28,39 +32,49 @@ public class AdminTools
         [Description("Source type: 'github' or 'azuredevops' (default: github)")] string source = "github")
     {
         HgvMateDiagnostics.RecordToolCall("add_repository");
-        if (string.IsNullOrWhiteSpace(name))
-            return "Error: name is required.";
-        if (name.Length > 128)
-            return "Error: name must be 128 characters or fewer.";
-        if (string.IsNullOrWhiteSpace(url))
-            return "Error: url is required.";
-
-        var validSources = new[] { "github", "azuredevops" };
-        if (!validSources.Contains(source.ToLowerInvariant()))
-            return $"Error: source must be one of: {string.Join(", ", validSources)}.";
-
+        var sw = Stopwatch.StartNew();
+        string? error = null;
         try
         {
-            var existing = await _registry.GetByNameAsync(name);
-            if (existing != null)
-                return $"Error: Repository '{name}' already exists.";
+            if (string.IsNullOrWhiteSpace(name))
+                return "Error: name is required.";
+            if (name.Length > 128)
+                return "Error: name must be 128 characters or fewer.";
+            if (string.IsNullOrWhiteSpace(url))
+                return "Error: url is required.";
 
-            var existingUrl = await _registry.GetByUrlAsync(url);
-            if (existingUrl != null)
-                return $"Error: A repository with the same URL is already registered as '{existingUrl.Name}' (branch: {existingUrl.Branch}). " +
-                       "Adding the same repo with a different branch would create mostly duplicate search results.";
+            var validSources = new[] { "github", "azuredevops" };
+            if (!validSources.Contains(source.ToLowerInvariant()))
+                return $"Error: source must be one of: {string.Join(", ", validSources)}.";
 
-            var repo = await _registry.AddAsync(name, url, branch, source.ToLowerInvariant(), addedBy: "mcp-tool");
-            _ = Task.Run(async () =>
+            try
             {
-                try { await _syncService.SyncRepoAsync(repo); }
-                catch (Exception ex) { _logger.LogError(ex, "Background sync failed for '{Name}'.", repo.Name); }
-            });
-            return $"Repository '{name}' added and sync initiated. Use hgvmate_index_status to track progress.";
+                var existing = await _registry.GetByNameAsync(name);
+                if (existing != null)
+                    return $"Error: Repository '{name}' already exists.";
+
+                var existingUrl = await _registry.GetByUrlAsync(url);
+                if (existingUrl != null)
+                    return $"Error: A repository with the same URL is already registered as '{existingUrl.Name}' (branch: {existingUrl.Branch}). " +
+                           "Adding the same repo with a different branch would create mostly duplicate search results.";
+
+                var repo = await _registry.AddAsync(name, url, branch, source.ToLowerInvariant(), addedBy: "mcp-tool");
+                _ = Task.Run(async () =>
+                {
+                    try { await _syncService.SyncRepoAsync(repo); }
+                    catch (Exception ex) { _logger.LogError(ex, "Background sync failed for '{Name}'.", repo.Name); }
+                });
+                return $"Repository '{name}' added and sync initiated. Use hgvmate_index_status to track progress.";
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return $"Error adding repository: {ex.Message}";
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            return $"Error adding repository: {ex.Message}";
+            _usageLogger.Log("hgvmate_add_repository", new { name, url, branch, source }, sw.Elapsed.TotalMilliseconds, error: error);
         }
     }
 
@@ -70,22 +84,32 @@ public class AdminTools
         [Description("Name of the repository to remove")] string name)
     {
         HgvMateDiagnostics.RecordToolCall("remove_repository");
-        if (string.IsNullOrWhiteSpace(name))
-            return "Error: name is required.";
-
+        var sw = Stopwatch.StartNew();
+        string? error = null;
         try
         {
-            var repo = await _registry.GetByNameAsync(name);
-            if (repo == null)
-                return $"Error: Repository '{name}' not found.";
+            if (string.IsNullOrWhiteSpace(name))
+                return "Error: name is required.";
 
-            await _syncService.DeleteRepoCloneAsync(name);
-            await _registry.RemoveAsync(name);
-            return $"Repository '{name}' removed successfully.";
+            try
+            {
+                var repo = await _registry.GetByNameAsync(name);
+                if (repo == null)
+                    return $"Error: Repository '{name}' not found.";
+
+                await _syncService.DeleteRepoCloneAsync(name);
+                await _registry.RemoveAsync(name);
+                return $"Repository '{name}' removed successfully.";
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return $"Error removing repository: {ex.Message}";
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            return $"Error removing repository: {ex.Message}";
+            _usageLogger.Log("hgvmate_remove_repository", new { name }, sw.Elapsed.TotalMilliseconds, error: error);
         }
     }
 
@@ -94,19 +118,31 @@ public class AdminTools
     public async Task<string> ListRepositories()
     {
         HgvMateDiagnostics.RecordToolCall("list_repositories");
+        var sw = Stopwatch.StartNew();
+        string? error = null;
+        int? resultCount = null;
         try
         {
-            var repos = await _registry.GetAllAsync();
-            if (!repos.Any())
-                return "No repositories registered. Use hgvmate_add_repository to add one.";
+            try
+            {
+                var repos = await _registry.GetAllAsync();
+                if (!repos.Any())
+                    return "No repositories registered. Use hgvmate_add_repository to add one.";
 
-            var lines = repos.Select(r =>
-                $"- {r.Name} | {r.Url} | branch: {r.Branch} | source: {r.Source} | enabled: {r.Enabled} | last_sha: {r.LastSha ?? "none"} | last_synced: {r.LastSynced ?? "never"}");
-            return string.Join("\n", lines);
+                resultCount = repos.Count;
+                var lines = repos.Select(r =>
+                    $"- {r.Name} | {r.Url} | branch: {r.Branch} | source: {r.Source} | enabled: {r.Enabled} | last_sha: {r.LastSha ?? "none"} | last_synced: {r.LastSynced ?? "never"}");
+                return string.Join("\n", lines);
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return $"Error listing repositories: {ex.Message}";
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            return $"Error listing repositories: {ex.Message}";
+            _usageLogger.Log("hgvmate_list_repositories", new { }, sw.Elapsed.TotalMilliseconds, resultCount: resultCount, error: error);
         }
     }
 
@@ -118,59 +154,68 @@ public class AdminTools
         [Description("Reindex scope: 'all' (default, full sync), 'vectors' (ONNX embeddings only), 'gitnexus' (structural analysis only)")] string scope = "all")
     {
         HgvMateDiagnostics.RecordToolCall("reindex");
-
-        var validScopes = new[] { "all", "vectors", "gitnexus" };
-        if (!validScopes.Contains(scope, StringComparer.OrdinalIgnoreCase))
-            return $"Error: scope must be one of: {string.Join(", ", validScopes)}.";
-
+        var sw = Stopwatch.StartNew();
+        string? error = null;
         try
         {
-            if (!string.IsNullOrWhiteSpace(repository))
+            var validScopes = new[] { "all", "vectors", "gitnexus" };
+            if (!validScopes.Contains(scope, StringComparer.OrdinalIgnoreCase))
+                return $"Error: scope must be one of: {string.Join(", ", validScopes)}.";
+
+            try
             {
-                var repo = await _registry.GetByNameAsync(repository);
-                if (repo == null)
-                    return $"Error: Repository '{repository}' not found.";
-
-                if (!scope.Equals("all", StringComparison.OrdinalIgnoreCase) && !_syncService.IsRepoCloned(repository))
-                    return $"Error: Repository '{repository}' is not cloned yet. Run a full reindex (scope 'all') first.";
-
-                _ = Task.Run(async () =>
+                if (!string.IsNullOrWhiteSpace(repository))
                 {
-                    try
+                    var repo = await _registry.GetByNameAsync(repository);
+                    if (repo == null)
+                        return $"Error: Repository '{repository}' not found.";
+
+                    if (!scope.Equals("all", StringComparison.OrdinalIgnoreCase) && !_syncService.IsRepoCloned(repository))
+                        return $"Error: Repository '{repository}' is not cloned yet. Run a full reindex (scope 'all') first.";
+
+                    _ = Task.Run(async () =>
                     {
-                        switch (scope.ToLowerInvariant())
+                        try
                         {
-                            case "vectors":
-                                await _syncService.ReindexVectorsAsync(repo);
-                                break;
-                            case "gitnexus":
-                                await _syncService.ReindexGitNexusAsync(repo);
-                                break;
-                            default:
-                                await _syncService.SyncRepoAsync(repo);
-                                break;
+                            switch (scope.ToLowerInvariant())
+                            {
+                                case "vectors":
+                                    await _syncService.ReindexVectorsAsync(repo);
+                                    break;
+                                case "gitnexus":
+                                    await _syncService.ReindexGitNexusAsync(repo);
+                                    break;
+                                default:
+                                    await _syncService.SyncRepoAsync(repo);
+                                    break;
+                            }
                         }
-                    }
-                    catch (Exception ex) { _logger.LogError(ex, "Background reindex failed for '{Name}'.", repo.Name); }
-                });
-                return $"Reindex triggered for '{repository}' (scope: {scope}).";
-            }
-            else
-            {
-                if (!scope.Equals("all", StringComparison.OrdinalIgnoreCase))
-                    return "Error: scope 'vectors' and 'gitnexus' require a specific repository name.";
-
-                _ = Task.Run(async () =>
+                        catch (Exception ex) { _logger.LogError(ex, "Background reindex failed for '{Name}'.", repo.Name); }
+                    });
+                    return $"Reindex triggered for '{repository}' (scope: {scope}).";
+                }
+                else
                 {
-                    try { await _syncService.SyncAllAsync(); }
-                    catch (Exception ex) { _logger.LogError(ex, "Background reindex-all failed."); }
-                });
-                return "Reindex triggered for all repositories.";
+                    if (!scope.Equals("all", StringComparison.OrdinalIgnoreCase))
+                        return "Error: scope 'vectors' and 'gitnexus' require a specific repository name.";
+
+                    _ = Task.Run(async () =>
+                    {
+                        try { await _syncService.SyncAllAsync(); }
+                        catch (Exception ex) { _logger.LogError(ex, "Background reindex-all failed."); }
+                    });
+                    return "Reindex triggered for all repositories.";
+                }
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return $"Error triggering reindex: {ex.Message}";
             }
         }
-        catch (Exception ex)
+        finally
         {
-            return $"Error triggering reindex: {ex.Message}";
+            _usageLogger.Log("hgvmate_reindex", new { repository, scope }, sw.Elapsed.TotalMilliseconds, error: error);
         }
     }
 
@@ -180,31 +225,43 @@ public class AdminTools
         [Description("Repository name to check, or omit for all repositories")] string? repository = null)
     {
         HgvMateDiagnostics.RecordToolCall("index_status");
+        var sw = Stopwatch.StartNew();
+        string? error = null;
+        int? resultCount = null;
         try
         {
-            IReadOnlyList<RepoRecord> repos;
-            if (!string.IsNullOrWhiteSpace(repository))
+            try
             {
-                var repo = await _registry.GetByNameAsync(repository);
-                if (repo == null)
-                    return $"Error: Repository '{repository}' not found.";
-                repos = [repo];
+                IReadOnlyList<RepoRecord> repos;
+                if (!string.IsNullOrWhiteSpace(repository))
+                {
+                    var repo = await _registry.GetByNameAsync(repository);
+                    if (repo == null)
+                        return $"Error: Repository '{repository}' not found.";
+                    repos = [repo];
+                }
+                else
+                {
+                    repos = await _registry.GetAllAsync();
+                }
+
+                if (!repos.Any())
+                    return "No repositories registered.";
+
+                resultCount = repos.Count;
+                var lines = repos.Select(r =>
+                    $"- {r.Name}: enabled={r.Enabled}, sha={r.LastSha ?? "none"}, synced={r.LastSynced ?? "never"}, source={r.Source}, state={r.SyncState}{(r.LastError != null ? $", error={r.LastError}" : "")}");
+                return string.Join("\n", lines);
             }
-            else
+            catch (Exception ex)
             {
-                repos = await _registry.GetAllAsync();
+                error = ex.Message;
+                return $"Error getting index status: {ex.Message}";
             }
-
-            if (!repos.Any())
-                return "No repositories registered.";
-
-            var lines = repos.Select(r =>
-                $"- {r.Name}: enabled={r.Enabled}, sha={r.LastSha ?? "none"}, synced={r.LastSynced ?? "never"}, source={r.Source}, state={r.SyncState}{(r.LastError != null ? $", error={r.LastError}" : "")}");
-            return string.Join("\n", lines);
         }
-        catch (Exception ex)
+        finally
         {
-            return $"Error getting index status: {ex.Message}";
+            _usageLogger.Log("hgvmate_index_status", new { repository }, sw.Elapsed.TotalMilliseconds, resultCount: resultCount, error: error);
         }
     }
 }
