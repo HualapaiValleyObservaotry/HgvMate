@@ -35,6 +35,8 @@ public class HybridSearchService
     public async Task<IReadOnlyList<SearchResult>> SearchAsync(
         string query,
         string? repositoryName = null,
+        string[]? includeExtensions = null,
+        string[]? excludePatterns = null,
         CancellationToken cancellationToken = default)
     {
         using var activity = HgvMateDiagnostics.ActivitySource.StartActivity("Search");
@@ -63,7 +65,34 @@ public class HybridSearchService
                     results.Add(new SearchResult(r.RepoName, r.FilePath, 0, r.Content, r.Score));
             }
 
-            return results
+            IEnumerable<SearchResult> filtered = results;
+
+            // Apply extension filter
+            if (includeExtensions?.Length > 0)
+            {
+                var exts = includeExtensions
+                    .Select(e => e.StartsWith('.') ? e : '.' + e)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                filtered = filtered.Where(r => exts.Contains(Path.GetExtension(r.FilePath)));
+            }
+
+            // Apply exclude-pattern filter
+            if (excludePatterns?.Length > 0)
+            {
+                filtered = filtered.Where(r =>
+                {
+                    var normalizedPath = r.FilePath.Replace('\\', '/');
+                    var fileName = Path.GetFileName(r.FilePath);
+                    return !excludePatterns.Any(p =>
+                    {
+                        var normalizedPattern = p.Replace('\\', '/');
+                        return System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(normalizedPattern, normalizedPath, ignoreCase: true) ||
+                               System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(p, fileName, ignoreCase: true);
+                    });
+                });
+            }
+
+            return filtered
                 .OrderByDescending(r => r.Score)
                 .Take(_searchOptions.MaxResults)
                 .ToList();

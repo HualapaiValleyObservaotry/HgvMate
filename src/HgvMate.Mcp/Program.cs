@@ -42,6 +42,9 @@ if (useSse)
 
     builder.Services.AddOpenApi();
 
+    // ProblemDetails (RFC 7807) for standardised error responses
+    builder.Services.AddProblemDetails();
+
     // Rate limiting for mutating REST API endpoints (#6)
     builder.Services.AddRateLimiter(options =>
     {
@@ -91,16 +94,18 @@ if (useSse)
             logger.LogError(ex, "Unhandled exception on {Method} {Path} [traceId={TraceId}]",
                 context.Request.Method, context.Request.Path, traceId);
 
-            context.Response.ContentType = "application/json";
-            context.Response.StatusCode = 500;
-
             var isDev = app.Environment.IsDevelopment();
-            await context.Response.WriteAsJsonAsync(new
+            var problem = new Microsoft.AspNetCore.Mvc.ProblemDetails
             {
-                error = "An unexpected error occurred.",
-                detail = isDev ? ex?.Message : null,
-                traceId
-            });
+                Status = 500,
+                Title = "An unexpected error occurred.",
+                Detail = isDev ? ex?.Message : null,
+                Extensions = { ["traceId"] = (object?)traceId }
+            };
+
+            context.Response.ContentType = "application/problem+json";
+            context.Response.StatusCode = 500;
+            await context.Response.WriteAsJsonAsync(problem);
         });
     });
 
