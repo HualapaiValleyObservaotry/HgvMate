@@ -42,12 +42,21 @@ public class IndexingService
     }
 
     /// <summary>Persists pending vector store changes to disk.</summary>
-    public Task SaveVectorStoreAsync() => _vectorStore.SaveAsync();
+    public virtual Task SaveVectorStoreAsync() => _vectorStore.SaveAsync();
 
     /// <summary>Returns true if the vector cache already contains chunks for the given repo.</summary>
     public bool HasVectorsForRepo(string repoName) => _vectorStore.HasChunksForRepo(repoName);
 
     public virtual async Task<IndexResult> IndexRepoAsync(string repoName, CancellationToken cancellationToken = default)
+        => await IndexRepoAsync(repoName, deferSave: false, cancellationToken);
+
+    /// <summary>
+    /// Indexes all indexable files in <paramref name="repoName"/>.
+    /// When <paramref name="deferSave"/> is <c>true</c>, the vector store is not flushed to disk —
+    /// the caller (e.g. <see cref="RepoSyncService.SyncAllAsync"/>) is responsible for a single
+    /// bulk flush after all repos are processed.
+    /// </summary>
+    public virtual async Task<IndexResult> IndexRepoAsync(string repoName, bool deferSave, CancellationToken cancellationToken = default)
     {
         using var activity = HgvMateDiagnostics.ActivitySource.StartActivity("IndexRepo");
         activity?.SetTag("hgvmate.repo.name", repoName);
@@ -108,7 +117,8 @@ public class IndexingService
             }
         }
 
-        await _vectorStore.SaveAsync();
+        if (!deferSave)
+            await _vectorStore.SaveAsync();
         HgvMateDiagnostics.SetVectorChunkCount(_vectorStore.CachedChunkCount);
 
         var duration = DateTime.UtcNow - started;

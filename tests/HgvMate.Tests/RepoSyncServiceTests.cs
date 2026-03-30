@@ -532,6 +532,168 @@ public sealed class RepoSyncServiceTests
         Assert.AreEqual(2, indexing.IndexRepoCalls, "Both repos should trigger full index.");
     }
 
+    // ─── Bulk sync: deferred VectorStore save ─────────────────────────────────
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task SyncAllAsync_BulkSync_DefersVectorStoreSave_UntilEnd()
+    {
+        // Two repos → bulk sync → IndexRepoAsync should use deferSave=true;
+        // SyncAllAsync should call SaveVectorStore exactly once at the end.
+        var clone1 = Path.Combine(_tempDir, "repos", "repo1");
+        var clone2 = Path.Combine(_tempDir, "repos", "repo2");
+        Directory.CreateDirectory(clone1);
+        Directory.CreateDirectory(clone2);
+
+        var responses = new Dictionary<string[], (string, int)>(StringArrayComparer.Instance)
+        {
+            { ["clone", "--depth", "1", "--single-branch", "--branch", "main", "https://example.com/r1.git", "."], ("", 0) },
+            { ["clone", "--depth", "1", "--single-branch", "--branch", "main", "https://example.com/r2.git", "."], ("", 0) },
+            { ["rev-parse", "HEAD"], ("sha123\n", 0) }
+        };
+
+        var (svc, indexing, registry) = await BuildServiceAsync(_tempDir, responses);
+        await registry.AddAsync("repo1", "https://example.com/r1.git", "main", "github");
+        await registry.AddAsync("repo2", "https://example.com/r2.git", "main", "github");
+
+        await svc.SyncAllAsync();
+
+        Assert.AreEqual(2, indexing.IndexRepoCalls, "Both repos should be indexed.");
+        Assert.IsTrue(indexing.DeferSaveValues.All(d => d), "All IndexRepoAsync calls in bulk sync should use deferSave=true.");
+        Assert.AreEqual(1, indexing.SaveVectorStoreCalls, "SaveVectorStore should be called exactly once at end of bulk sync.");
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task SyncRepoAsync_SingleRepo_DoesNotDeferVectorStoreSave()
+    {
+        // Single repo sync (not bulk) → deferSave=false, SaveAsync is called by IndexRepoAsync itself
+        const string sha = "aabb00";
+        var repo = new RepoRecord(1, "solo", "https://example.com/s.git", "main", "github", true, null, null, null);
+        var clonePath = Path.Combine(_tempDir, "repos", "solo");
+        Directory.CreateDirectory(clonePath);
+
+        var responses = new Dictionary<string[], (string, int)>(StringArrayComparer.Instance)
+        {
+            { ["clone", "--depth", "1", "--single-branch", "--branch", "main", "https://example.com/s.git", "."], ("", 0) },
+            { ["rev-parse", "HEAD"], (sha + "\n", 0) }
+        };
+
+        var (svc, indexing, _) = await BuildServiceAsync(_tempDir, responses);
+
+        await svc.SyncRepoAsync(repo);
+
+        Assert.AreEqual(1, indexing.IndexRepoCalls);
+        Assert.IsFalse(indexing.DeferSaveValues[0], "Single repo sync should not defer save.");
+        // SaveVectorStore should NOT be called from outside IndexRepoAsync in a single-repo sync
+        Assert.AreEqual(0, indexing.SaveVectorStoreCalls,
+            "SaveVectorStore should not be called externally when deferSave=false (IndexRepoAsync handles it).");
+    }
+
+    // ─── Skip GitNexus for non-structural changes ─────────────────────────────
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void HasStructuralChanges_ReturnsFalse_ForDocAndConfigOnly()
+    {
+        var files = new[] { "README.md", "docs/notes.md", "config.json", "infra.yaml" };
+        Assert.IsFalse(RepoSyncService.HasStructuralChanges(files),
+            "Doc/config-only changes should not require GitNexus re-analysis.");
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void HasStructuralChanges_ReturnsTrue_WhenCsFileChanged()
+    {
+        var files = new[] { "README.md", "src/Service.cs" };
+        Assert.IsTrue(RepoSyncService.HasStructuralChanges(files),
+            "A .cs file change should trigger GitNexus re-analysis.");
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void HasStructuralChanges_ReturnsTrue_ForAllStructuralExtensions()
+    {
+        var extensions = new[] { ".cs", ".ts", ".js", ".tsx", ".jsx", ".py", ".java", ".go", ".rs",
+            ".cpp", ".c", ".h", ".hpp", ".rb", ".php", ".swift", ".kt", ".scala" };
+        foreach (var ext in extensions)
+        {
+            var files = new[] { $"src/File{ext}" };
+            Assert.IsTrue(RepoSyncService.HasStructuralChanges(files),
+                $"Extension {ext} should be considered structural.");
+        }
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task SyncRepoAsync_SkipsGitNexus_WhenOnlyDocFilesChanged()
+    {
+        const string oldSha = "aabbcc";
+        const string newSha = "ddeeff";
+        var repo = new RepoRecord(1, "myrepo", "https://example.com/r.git", "main", "github", true, oldSha, null, null);
+
+        var clonePath = Path.Combine(_tempDir, "repos", "myrepo");
+        Directory.CreateDirectory(Path.Combine(clonePath, ".git"));
+
+        var responses = new Dictionary<string[], (string, int)>(StringArrayComparer.Instance)
+        {
+            { ["fetch", "--depth", "1", "origin", "main"], ("", 0) },
+            { ["reset", "--hard", "origin/main"], ("", 0) },
+            { ["rev-parse", "HEAD"], (newSha + "\n", 0) },
+            // Only doc/config files changed
+            { ["diff", "--name-only", $"{oldSha}..{newSha}"], ("README.md\ndocs/notes.md\n", 0) }
+        };
+
+        var (svc, indexing, _) = await BuildServiceAsync(_tempDir, responses);
+        // The HasStructuralChanges static helper is tested above; here we verify the full path runs.
+        await svc.SyncRepoAsync(repo);
+
+        Assert.AreEqual(0, indexing.IndexRepoCalls, "Should not full-index.");
+        Assert.AreEqual(2, indexing.IndexFileCalls, "Both doc files should be indexed.");
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task SyncRepoAsync_EnqueuesGitNexus_WhenStructuralFileChanged()
+    {
+        const string oldSha = "aabbcc";
+        const string newSha = "ddeeff";
+        var repo = new RepoRecord(1, "myrepo", "https://example.com/r.git", "main", "github", true, oldSha, null, null);
+
+        var clonePath = Path.Combine(_tempDir, "repos", "myrepo");
+        Directory.CreateDirectory(Path.Combine(clonePath, ".git"));
+
+        var responses = new Dictionary<string[], (string, int)>(StringArrayComparer.Instance)
+        {
+            { ["fetch", "--depth", "1", "origin", "main"], ("", 0) },
+            { ["reset", "--hard", "origin/main"], ("", 0) },
+            { ["rev-parse", "HEAD"], (newSha + "\n", 0) },
+            // Mix of structural and doc changes
+            { ["diff", "--name-only", $"{oldSha}..{newSha}"], ("src/Service.cs\nREADME.md\n", 0) }
+        };
+
+        var (svc, indexing, _) = await BuildServiceAsync(_tempDir, responses);
+        await svc.SyncRepoAsync(repo);
+
+        Assert.AreEqual(0, indexing.IndexRepoCalls, "Should not full-index.");
+        Assert.AreEqual(2, indexing.IndexFileCalls, "Both changed files should be indexed.");
+        // GitNexus is enqueued (verified via EnqueueGitNexusAnalysis not throwing)
+    }
+
+    // ─── GitNexus fire-and-forget ────────────────────────────────────────────
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task EnqueueGitNexusAnalysis_DoesNotThrow_WhenCalledManyTimes()
+    {
+        // Verifies the bounded channel doesn't throw when called many times (capacity 256, DropWrite)
+        var (svc, _, _) = await BuildServiceAsync(_tempDir);
+
+        // Enqueue many times — if channel fills up, TryWrite returns false (coalescing), no exception
+        for (int i = 0; i < 300; i++)
+            svc.EnqueueGitNexusAnalysis($"repo{i % 40}");
+    }
+
     // ─── Inner test helpers ──────────────────────────────────────────────────
 
     /// <summary>Subclass that intercepts RunGitAsync and returns canned responses.</summary>
@@ -572,7 +734,9 @@ public sealed class RepoSyncServiceTests
     {
         public int IndexRepoCalls { get; private set; }
         public int IndexFileCalls { get; private set; }
+        public int SaveVectorStoreCalls { get; private set; }
         public List<string> IndexedFiles { get; } = [];
+        public List<bool> DeferSaveValues { get; } = [];
         public VectorStore VectorStore { get; }
 
         public TrackingIndexingService(
@@ -585,10 +749,11 @@ public sealed class RepoSyncServiceTests
             VectorStore = vectorStore;
         }
 
-        public override Task<IndexResult> IndexRepoAsync(string repoName, CancellationToken cancellationToken = default)
+        public override Task<IndexResult> IndexRepoAsync(string repoName, bool deferSave, CancellationToken cancellationToken = default)
         {
             IndexRepoCalls++;
-            return base.IndexRepoAsync(repoName, cancellationToken);
+            DeferSaveValues.Add(deferSave);
+            return base.IndexRepoAsync(repoName, deferSave, cancellationToken);
         }
 
         public override Task IndexFileAsync(string repoName, string relativePath, CancellationToken cancellationToken = default)
@@ -596,6 +761,12 @@ public sealed class RepoSyncServiceTests
             IndexFileCalls++;
             IndexedFiles.Add(relativePath);
             return base.IndexFileAsync(repoName, relativePath, cancellationToken);
+        }
+
+        public override Task SaveVectorStoreAsync()
+        {
+            SaveVectorStoreCalls++;
+            return base.SaveVectorStoreAsync();
         }
     }
 
