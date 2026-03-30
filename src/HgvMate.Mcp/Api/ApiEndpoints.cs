@@ -211,7 +211,7 @@ public static class ApiEndpoints
         .RequireRateLimiting("mutating")
         .WithSummary("Remove a repository and delete its cloned data");
 
-        repos.MapPost("/{name}/reindex", async (string name, bool? force, IRepoRegistry registry, RepoSyncService syncService, ILogger<RepoSyncService> logger) =>
+        repos.MapPost("/{name}/reindex", async (string name, bool? force, string? scope, IRepoRegistry registry, RepoSyncService syncService, ILogger<RepoSyncService> logger) =>
         {
             var repo = await registry.GetByNameAsync(name);
             if (repo == null)
@@ -219,16 +219,43 @@ public static class ApiEndpoints
                     detail: $"Repository '{name}' not found.",
                     statusCode: StatusCodes.Status404NotFound);
 
+            var reindexScope = scope?.ToLowerInvariant() ?? "all";
+            var validScopes = new[] { "all", "vectors", "gitnexus" };
+            if (!validScopes.Contains(reindexScope))
+                return Results.Problem(
+                    detail: $"scope must be one of: {string.Join(", ", validScopes)}.",
+                    statusCode: StatusCodes.Status400BadRequest);
+
+            if (reindexScope != "all" && !syncService.IsRepoCloned(name))
+                return Results.Problem(
+                    detail: $"Repository '{name}' is not cloned yet. Run a full reindex first.",
+                    statusCode: StatusCodes.Status409Conflict);
+
             var isForce = force == true;
             _ = Task.Run(async () =>
             {
-                try { await syncService.SyncRepoAsync(repo, isForce); }
+                try
+                {
+                    switch (reindexScope)
+                    {
+                        case "vectors":
+                            await syncService.ReindexVectorsAsync(repo);
+                            break;
+                        case "gitnexus":
+                            await syncService.ReindexGitNexusAsync(repo);
+                            break;
+                        default:
+                            await syncService.SyncRepoAsync(repo, isForce);
+                            break;
+                    }
+                }
                 catch (Exception ex) { logger.LogError(ex, "Background reindex failed for '{Name}'.", name); }
             });
-            return Results.Accepted(value: new { message = $"Reindex triggered for '{name}'{(isForce ? " (force)" : "")}." });
+            return Results.Accepted(value: new { message = $"Reindex triggered for '{name}' (scope: {reindexScope}){(isForce && reindexScope == "all" ? ", force" : "")}." });
         })
         .RequireRateLimiting("mutating")
-        .WithSummary("Trigger reindex for a specific repository. Use ?force=true to re-embed even if unchanged.");
+        .WithSummary("Trigger reindex for a specific repository. " +
+                     "Optional: ?force=true to re-embed even if unchanged, ?scope=all|vectors|gitnexus to limit reindex scope.");
 
         repos.MapPost("/reindex", async (bool? force, IRepoRegistry registry, RepoSyncService syncService, ILogger<RepoSyncService> logger) =>
         {

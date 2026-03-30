@@ -68,6 +68,9 @@ public class RepoSyncService : BackgroundService
     public string GetClonePath(string repoName)
         => Path.Combine(_syncOptions.ResolveCloneRoot(_hgvMateOptions.DataPath), repoName);
 
+    public virtual bool IsRepoCloned(string repoName)
+        => Directory.Exists(Path.Combine(GetClonePath(repoName), ".git"));
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Yield immediately so the host can finish starting (Kestrel begins accepting requests)
@@ -425,6 +428,34 @@ public class RepoSyncService : BackgroundService
     {
         if (!_gitNexusQueue.Writer.TryWrite(repoName))
             _logger.LogDebug("GitNexus queue full; analysis for '{Repo}' dropped (best-effort, will retry next cycle).", repoName);
+    }
+
+    /// <summary>
+    /// Re-index only the ONNX vector embeddings for a single repository without pulling new code.
+    /// </summary>
+    public virtual async Task ReindexVectorsAsync(RepoRecord repo, CancellationToken cancellationToken = default)
+    {
+        var clonePath = GetClonePath(repo.Name);
+        if (!Directory.Exists(Path.Combine(clonePath, ".git")))
+            throw new DirectoryNotFoundException($"Repository '{repo.Name}' is not cloned yet.");
+
+        _logger.LogInformation("Vector-only reindex for '{Name}'...", repo.Name);
+        await _indexingService.IndexRepoAsync(repo.Name, deferSave: false, cancellationToken);
+        _logger.LogInformation("Vector-only reindex complete for '{Name}'.", repo.Name);
+    }
+
+    /// <summary>
+    /// Re-run only the GitNexus structural analysis for a single repository without pulling new code.
+    /// </summary>
+    public virtual async Task ReindexGitNexusAsync(RepoRecord repo, CancellationToken cancellationToken = default)
+    {
+        var clonePath = GetClonePath(repo.Name);
+        if (!Directory.Exists(Path.Combine(clonePath, ".git")))
+            throw new DirectoryNotFoundException($"Repository '{repo.Name}' is not cloned yet.");
+
+        _logger.LogInformation("GitNexus-only reindex for '{Name}'...", repo.Name);
+        await _gitNexusService.AnalyzeAsync(repo.Name, cancellationToken);
+        _logger.LogInformation("GitNexus-only reindex complete for '{Name}'.", repo.Name);
     }
 
     /// <summary>

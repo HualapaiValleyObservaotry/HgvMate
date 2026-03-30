@@ -271,6 +271,55 @@ public sealed class RestApiTests : IDisposable
     }
 
     [TestMethod]
+    public async Task ReindexRepo_InvalidScope_ReturnsBadRequest()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        // Add a repo first
+        await client.PostAsJsonAsync("/api/repositories", new { name = "scope-repo", url = "https://github.com/example/repo.git" });
+
+        var response = await client.PostAsync("/api/repositories/scope-repo/reindex?scope=invalid", null);
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.IsTrue(body.TryGetProperty("detail", out var detail));
+        Assert.Contains("scope must be one of", detail.GetString()!);
+    }
+
+    [TestMethod]
+    public async Task ReindexRepo_VectorsScope_UnclonedRepo_ReturnsConflict()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        await client.PostAsJsonAsync("/api/repositories", new { name = "vec-repo", url = "https://github.com/example/vec.git" });
+
+        var response = await client.PostAsync("/api/repositories/vec-repo/reindex?scope=vectors", null);
+
+        Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.IsTrue(body.TryGetProperty("detail", out var detail));
+        Assert.Contains("not cloned yet", detail.GetString()!);
+    }
+
+    [TestMethod]
+    public async Task ReindexRepo_GitNexusScope_UnclonedRepo_ReturnsConflict()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        await client.PostAsJsonAsync("/api/repositories", new { name = "gn-repo", url = "https://github.com/example/gn.git" });
+
+        var response = await client.PostAsync("/api/repositories/gn-repo/reindex?scope=gitnexus", null);
+
+        Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.IsTrue(body.TryGetProperty("detail", out var detail));
+        Assert.Contains("not cloned yet", detail.GetString()!);
+    }
+
+    [TestMethod]
     public async Task Diagnostics_ReturnsOk_WithExpectedFields()
     {
         await using var app = await CreateTestApp();

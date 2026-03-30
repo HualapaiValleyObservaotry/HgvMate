@@ -30,6 +30,9 @@ public class GitNexusService
         var repoPath = GetRepoPath(repoName);
         _logger.LogInformation("Running GitNexus analysis on '{Repo}'...", repoName);
         await RunGitNexusCommandAsync("analyze", repoPath, cancellationToken);
+        // Register the repo in the global registry so query/context/impact commands can find it.
+        // 'gitnexus analyze' creates .gitnexus/ but does not register it in the global registry.
+        await RunGitNexusCommandAsync("index", repoPath, cancellationToken);
     }
 
     public async Task<string> FindSymbolAsync(string symbolName, string? repoName = null, CancellationToken cancellationToken = default)
