@@ -276,7 +276,8 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
 
         // 3. Auto-download broadest-compat quantized model to data path.
         // This path only runs in local dev when the model is missing (Docker images pre-bake models).
-        // Uses Task.Run to avoid blocking the DI container / thread pool directly.
+        // Synchronous download is intentional: the constructor must complete before the embedder is used,
+        // and this only runs once when the model file is absent.
         var (downloadName, downloadUrl) = DefaultQuantizedDownload;
         var downloadPath = Path.Combine(options.DataPath, "models", downloadName);
         _logger.LogInformation("ONNX model not found locally. Downloading {Model} from Hugging Face...", downloadName);
@@ -285,18 +286,17 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
             var modelsDir = Path.GetDirectoryName(downloadPath)!;
             Directory.CreateDirectory(modelsDir);
 
-            var tempPath = downloadPath + ".download";
-            Task.Run(async () =>
-            {
-                using var httpClient = new HttpClient();
-                httpClient.Timeout = TimeSpan.FromMinutes(10);
+            using var httpClient = new HttpClient();
+            httpClient.Timeout = TimeSpan.FromMinutes(10);
 
-                using var response = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
+            var tempPath = downloadPath + ".download";
+            using (var response = httpClient.Send(new HttpRequestMessage(HttpMethod.Get, downloadUrl), HttpCompletionOption.ResponseHeadersRead))
+            {
                 response.EnsureSuccessStatusCode();
-                await using var stream = await response.Content.ReadAsStreamAsync();
-                await using var fileStream = File.Create(tempPath);
-                await stream.CopyToAsync(fileStream);
-            }).GetAwaiter().GetResult();
+                using var stream = response.Content.ReadAsStream();
+                using var fileStream = File.Create(tempPath);
+                stream.CopyTo(fileStream);
+            }
 
             File.Move(tempPath, downloadPath, overwrite: true);
             _logger.LogInformation("Quantized ONNX model downloaded to '{Path}'.", downloadPath);

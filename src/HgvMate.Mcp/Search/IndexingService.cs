@@ -225,7 +225,8 @@ public class IndexingService
             if (fileInfo.Exists && fileInfo.Length > MaxIndexableFileSize)
                 return false;
         }
-        catch { /* file may not exist yet; allow indexing attempt */ }
+        catch (IOException) { /* file may not exist or be inaccessible; allow indexing attempt */ }
+        catch (UnauthorizedAccessException) { /* insufficient permissions; allow indexing attempt */ }
 
         return true;
     }
