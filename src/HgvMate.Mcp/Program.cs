@@ -1,4 +1,4 @@
-﻿using HgvMate.Mcp;
+using HgvMate.Mcp;
 using HgvMate.Mcp.Api;
 using HgvMate.Mcp.Configuration;
 using HgvMate.Mcp.Repos;
@@ -168,7 +168,7 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
         ?? Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
     if (!string.IsNullOrEmpty(otlpEndpoint))
     {
-        Console.WriteLine($"[OTLP] Configuring OpenTelemetry export: endpoint={otlpEndpoint}, service={serviceName}");
+        Console.Error.WriteLine($"[OTLP] Configuring OpenTelemetry export: endpoint={otlpEndpoint}, service={serviceName}");
 
         services.AddOpenTelemetryExport(options =>
         {
@@ -178,8 +178,8 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
             options.EnableLogExport = true;
             options.EnableStandardMeters = true;
 
-            options.AdditionalActivitySources.Add("HgvMate");
-            options.AdditionalMeterNames.Add("HgvMate");
+            options.AdditionalActivitySources.Add(HgvMateDiagnostics.ServiceName);
+            options.AdditionalMeterNames.Add(HgvMateDiagnostics.ServiceName);
 
             options.ConfigureTracerProvider = builder =>
             {
@@ -195,7 +195,7 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
     }
     else
     {
-        Console.WriteLine("[OTLP] No OTLP endpoint configured — skipping OpenTelemetry export.");
+        Console.Error.WriteLine("[OTLP] No OTLP endpoint configured — skipping OpenTelemetry export.");
     }
 
     services.AddTelemetryStatistics();
