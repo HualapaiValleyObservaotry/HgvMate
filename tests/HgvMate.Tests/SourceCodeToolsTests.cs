@@ -1,6 +1,7 @@
 using HgvMate.Mcp.Configuration;
 using HgvMate.Mcp.Search;
 using HgvMate.Mcp.Tools;
+using HgvMate.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HgvMate.Tests;
@@ -33,7 +34,7 @@ public sealed class SourceCodeToolsTests
         var grepService = new GitGrepSearchService(fakeRegistry, reader, searchOptions, NullLogger<GitGrepSearchService>.Instance);
         var hybridSearch = new HybridSearchService(grepService, vectorStore, embedder, searchOptions, NullLogger<HybridSearchService>.Instance);
 
-        _tools = new SourceCodeTools(hybridSearch, reader);
+        _tools = new SourceCodeTools(hybridSearch, reader, TestToolUsageLogger.Create(_tempDir));
 
         // Create a fake repo with multiple files
         var repoPath = Path.Combine(_tempDir, "repos", "testrepo");

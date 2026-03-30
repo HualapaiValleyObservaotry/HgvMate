@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using HgvMate.Mcp.Configuration;
+using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
 using HgvMate.Mcp.Tools;
@@ -171,12 +172,15 @@ public sealed class SseTransportTests : IDisposable
                 sp.GetRequiredService<ILoggerFactory>().CreateLogger<VectorStore>()));
         builder.Services.AddSingleton<IndexingService>();
         builder.Services.AddSingleton<HybridSearchService>();
+        builder.Services.AddSingleton(sp =>
+            new ToolUsageLogger(_tempDir, sp.GetRequiredService<ILoggerFactory>().CreateLogger<ToolUsageLogger>()));
 
         builder.Services.AddMcpServer()
             .WithHttpTransport()
             .WithTools<AdminTools>()
             .WithTools<SourceCodeTools>()
-            .WithTools<StructuralTools>();
+            .WithTools<StructuralTools>()
+            .WithTools<UsageReportTools>();
 
         var app = builder.Build();
 

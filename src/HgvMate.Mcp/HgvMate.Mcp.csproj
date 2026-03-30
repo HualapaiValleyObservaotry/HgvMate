@@ -13,6 +13,7 @@
     <PackageReference Include="HVO.Enterprise.Telemetry" Version="1.0.3" />
     <PackageReference Include="HVO.Enterprise.Telemetry.OpenTelemetry" Version="1.1.2" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0-rc.2.*" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.5" />
     <PackageReference Include="ModelContextProtocol" Version="0.3.0-preview.1" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="0.3.0-preview.1" />
     <!-- ONNX Runtime: package selected by OnnxProvider property.

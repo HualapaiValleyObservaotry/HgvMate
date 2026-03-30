@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using HgvMate.Mcp.Api;
 using HgvMate.Mcp.Configuration;
+using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
 using HgvMate.Mcp.Tools;
@@ -497,6 +498,8 @@ public sealed class RestApiTests : IDisposable
                 sp.GetRequiredService<ILoggerFactory>().CreateLogger<VectorStore>()));
         builder.Services.AddSingleton<IndexingService>();
         builder.Services.AddSingleton<HybridSearchService>();
+        builder.Services.AddSingleton(sp =>
+            new ToolUsageLogger(_tempDir, sp.GetRequiredService<ILoggerFactory>().CreateLogger<ToolUsageLogger>()));
 
         builder.Services.AddTelemetry(options =>
         {
@@ -511,12 +514,16 @@ public sealed class RestApiTests : IDisposable
             .WithHttpTransport()
             .WithTools<AdminTools>()
             .WithTools<SourceCodeTools>()
-            .WithTools<StructuralTools>();
+            .WithTools<StructuralTools>()
+            .WithTools<UsageReportTools>();
 
         var app = builder.Build();
 
         var vectorStore = app.Services.GetRequiredService<VectorStore>();
         await vectorStore.LoadAsync();
+
+        var usageLogger = app.Services.GetRequiredService<ToolUsageLogger>();
+        await usageLogger.InitializeAsync();
 
         startupState.MarkDatabaseReady();
         if (markReady)
