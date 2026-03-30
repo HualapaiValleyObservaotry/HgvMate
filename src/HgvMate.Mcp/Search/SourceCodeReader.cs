@@ -22,6 +22,9 @@ public class SourceCodeReader
     public string GetRepoRoot(string repoName)
         => Path.Combine(_syncOptions.ResolveCloneRoot(_hgvMateOptions.DataPath), repoName);
 
+    /// <summary>Maximum file size that can be read (10 MB). Prevents OOM from large auto-generated or binary files.</summary>
+    private const long MaxFileSizeBytes = 10 * 1024 * 1024;
+
     /// <summary>
     /// Reads a file from a cloned repository, with path traversal protection.
     /// </summary>
@@ -49,6 +52,11 @@ public class SourceCodeReader
 
         if (!File.Exists(fullPath))
             throw new FileNotFoundException($"File not found: '{relativePath}' in repository '{repoName}'.");
+
+        var fileInfo = new FileInfo(fullPath);
+        if (fileInfo.Length > MaxFileSizeBytes)
+            throw new InvalidOperationException(
+                $"File '{relativePath}' is too large ({fileInfo.Length / (1024 * 1024)} MB). Maximum allowed size is {MaxFileSizeBytes / (1024 * 1024)} MB.");
 
         return await File.ReadAllTextAsync(fullPath);
     }

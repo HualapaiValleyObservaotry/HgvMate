@@ -11,6 +11,7 @@ using HVO.Enterprise.Telemetry.HealthChecks;
 using HVO.Enterprise.Telemetry.Logging;
 using HVO.Enterprise.Telemetry.OpenTelemetry;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -40,6 +41,19 @@ if (useSse)
     ConfigureServices(builder.Services, builder.Configuration, transport);
 
     builder.Services.AddOpenApi();
+
+    // Rate limiting for mutating REST API endpoints (#6)
+    builder.Services.AddRateLimiter(options =>
+    {
+        options.AddFixedWindowLimiter("mutating", limiter =>
+        {
+            limiter.PermitLimit = 10;
+            limiter.Window = TimeSpan.FromMinutes(1);
+            limiter.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
+            limiter.QueueLimit = 2;
+        });
+        options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    });
 
     builder.Services.AddMcpServer()
         .WithHttpTransport()
@@ -89,6 +103,8 @@ if (useSse)
             });
         });
     });
+
+    app.UseRateLimiter();
 
     app.MapOpenApi();
     app.MapScalarApiReference();

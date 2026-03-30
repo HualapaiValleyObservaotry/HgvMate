@@ -143,10 +143,12 @@ public static class ApiEndpoints
         })
         .WithSummary("List all registered repositories with their sync status");
 
-        repos.MapPost("/", async (AddRepoRequest request, IRepoRegistry registry, RepoSyncService syncService) =>
+        repos.MapPost("/", async (AddRepoRequest request, IRepoRegistry registry, RepoSyncService syncService, ILogger<RepoSyncService> logger) =>
         {
             if (string.IsNullOrWhiteSpace(request.Name))
                 return Results.BadRequest(new { error = "name is required." });
+            if (request.Name.Length > 128)
+                return Results.BadRequest(new { error = "name must be 128 characters or fewer." });
             if (string.IsNullOrWhiteSpace(request.Url))
                 return Results.BadRequest(new { error = "url is required." });
 
@@ -165,7 +167,11 @@ public static class ApiEndpoints
                     "Adding the same repo with a different branch would create mostly duplicate search results." });
 
             var repo = await registry.AddAsync(request.Name, request.Url, request.Branch ?? "main", source.ToLowerInvariant(), addedBy: "rest-api");
-            _ = Task.Run(() => syncService.SyncRepoAsync(repo));
+            _ = Task.Run(async () =>
+            {
+                try { await syncService.SyncRepoAsync(repo); }
+                catch (Exception ex) { logger.LogError(ex, "Background sync failed for '{Name}'.", repo.Name); }
+            });
             return Results.Accepted($"/api/repositories/{repo.Name}/status", new
             {
                 message = $"Repository '{repo.Name}' added. Sync initiated.",
@@ -177,6 +183,7 @@ public static class ApiEndpoints
                 SyncState = repo.SyncState
             });
         })
+        .RequireRateLimiting("mutating")
         .WithSummary("Add a repository to be indexed");
 
         repos.MapDelete("/{name}", async (string name, IRepoRegistry registry, RepoSyncService syncService) =>
@@ -193,26 +200,37 @@ public static class ApiEndpoints
             await registry.RemoveAsync(name);
             return Results.Ok(new { message = $"Repository '{name}' removed." });
         })
+        .RequireRateLimiting("mutating")
         .WithSummary("Remove a repository and delete its cloned data");
 
-        repos.MapPost("/{name}/reindex", async (string name, bool? force, IRepoRegistry registry, RepoSyncService syncService) =>
+        repos.MapPost("/{name}/reindex", async (string name, bool? force, IRepoRegistry registry, RepoSyncService syncService, ILogger<RepoSyncService> logger) =>
         {
             var repo = await registry.GetByNameAsync(name);
             if (repo == null)
                 return Results.NotFound(new { error = $"Repository '{name}' not found." });
 
             var isForce = force == true;
-            _ = Task.Run(() => syncService.SyncRepoAsync(repo, isForce));
+            _ = Task.Run(async () =>
+            {
+                try { await syncService.SyncRepoAsync(repo, isForce); }
+                catch (Exception ex) { logger.LogError(ex, "Background reindex failed for '{Name}'.", name); }
+            });
             return Results.Accepted(value: new { message = $"Reindex triggered for '{name}'{(isForce ? " (force)" : "")}." });
         })
+        .RequireRateLimiting("mutating")
         .WithSummary("Trigger reindex for a specific repository. Use ?force=true to re-embed even if unchanged.");
 
-        repos.MapPost("/reindex", async (bool? force, IRepoRegistry registry, RepoSyncService syncService) =>
+        repos.MapPost("/reindex", async (bool? force, IRepoRegistry registry, RepoSyncService syncService, ILogger<RepoSyncService> logger) =>
         {
             var isForce = force == true;
-            _ = Task.Run(() => syncService.SyncAllAsync(isForce));
+            _ = Task.Run(async () =>
+            {
+                try { await syncService.SyncAllAsync(isForce); }
+                catch (Exception ex) { logger.LogError(ex, "Background reindex-all failed."); }
+            });
             return TypedResults.Ok(new { message = $"Reindex triggered for all repositories{(isForce ? " (force)" : "")}." });
         })
+        .RequireRateLimiting("mutating")
         .WithSummary("Trigger reindex for all repositories. Use ?force=true to re-embed even if unchanged.");
 
         repos.MapGet("/{name}/status", async (string name, IRepoRegistry registry) =>

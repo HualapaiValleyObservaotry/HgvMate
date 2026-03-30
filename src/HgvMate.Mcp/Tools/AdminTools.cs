@@ -1,4 +1,5 @@
 using HgvMate.Mcp.Repos;
+using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using System.ComponentModel;
 
@@ -9,11 +10,13 @@ public class AdminTools
 {
     private readonly IRepoRegistry _registry;
     private readonly RepoSyncService _syncService;
+    private readonly ILogger<AdminTools> _logger;
 
-    public AdminTools(IRepoRegistry registry, RepoSyncService syncService)
+    public AdminTools(IRepoRegistry registry, RepoSyncService syncService, ILogger<AdminTools> logger)
     {
         _registry = registry;
         _syncService = syncService;
+        _logger = logger;
     }
 
     [McpServerTool(Name = "hgvmate_add_repository")]
@@ -27,6 +30,8 @@ public class AdminTools
         HgvMateDiagnostics.RecordToolCall("add_repository");
         if (string.IsNullOrWhiteSpace(name))
             return "Error: name is required.";
+        if (name.Length > 128)
+            return "Error: name must be 128 characters or fewer.";
         if (string.IsNullOrWhiteSpace(url))
             return "Error: url is required.";
 
@@ -46,7 +51,11 @@ public class AdminTools
                        "Adding the same repo with a different branch would create mostly duplicate search results.";
 
             var repo = await _registry.AddAsync(name, url, branch, source.ToLowerInvariant(), addedBy: "mcp-tool");
-            _ = Task.Run(() => _syncService.SyncRepoAsync(repo));
+            _ = Task.Run(async () =>
+            {
+                try { await _syncService.SyncRepoAsync(repo); }
+                catch (Exception ex) { _logger.LogError(ex, "Background sync failed for '{Name}'.", repo.Name); }
+            });
             return $"Repository '{name}' added and sync initiated. Use hgvmate_index_status to track progress.";
         }
         catch (Exception ex)
@@ -114,12 +123,20 @@ public class AdminTools
                 var repo = await _registry.GetByNameAsync(repository);
                 if (repo == null)
                     return $"Error: Repository '{repository}' not found.";
-                _ = Task.Run(() => _syncService.SyncRepoAsync(repo));
+                _ = Task.Run(async () =>
+                {
+                    try { await _syncService.SyncRepoAsync(repo); }
+                    catch (Exception ex) { _logger.LogError(ex, "Background reindex failed for '{Name}'.", repo.Name); }
+                });
                 return $"Reindex triggered for '{repository}'.";
             }
             else
             {
-                _ = Task.Run(() => _syncService.SyncAllAsync());
+                _ = Task.Run(async () =>
+                {
+                    try { await _syncService.SyncAllAsync(); }
+                    catch (Exception ex) { _logger.LogError(ex, "Background reindex-all failed."); }
+                });
                 return "Reindex triggered for all repositories.";
             }
         }

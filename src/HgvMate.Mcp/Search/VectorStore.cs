@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Numerics.Tensors;
 using Microsoft.Extensions.Logging;
 
 namespace HgvMate.Mcp.Search;
@@ -18,14 +19,15 @@ public record VectorSearchResult(string RepoName, string FilePath, int ChunkInde
 /// Replaces the previous SQLite-backed implementation to eliminate lock contention on network
 /// filesystems where SQLite's locking model is unreliable.
 /// </summary>
-public class VectorStore
+public class VectorStore : IDisposable
 {
     private static readonly byte[] Magic = "HGVM"u8.ToArray();
     private const uint FormatVersion = 1;
 
     private readonly string _storagePath;
     private readonly ILogger<VectorStore> _logger;
-    private readonly Lock _saveLock = new();
+    private readonly SemaphoreSlim _saveLock = new(1, 1);
+    private bool _disposed;
 
     // In-memory cache: keyed by (repo_name, file_path, chunk_index)
     private readonly ConcurrentDictionary<(string Repo, string File, int Index), CachedChunk> _cache = new();
@@ -112,9 +114,10 @@ public class VectorStore
 
         var tempPath = _storagePath + ".tmp";
 
-        await Task.Run(() =>
+        await _saveLock.WaitAsync();
+        try
         {
-            lock (_saveLock)
+            await Task.Run(() =>
             {
                 var dir = Path.GetDirectoryName(_storagePath);
                 if (!string.IsNullOrEmpty(dir))
@@ -141,8 +144,12 @@ public class VectorStore
 
                 // Atomic replace
                 File.Move(tempPath, _storagePath, overwrite: true);
-            }
-        });
+            });
+        }
+        finally
+        {
+            _saveLock.Release();
+        }
 
         _logger.LogInformation("Vector store saved: {Count} chunks to {Path}.", snapshot.Length, _storagePath);
     }
@@ -230,17 +237,31 @@ public class VectorStore
         return floats;
     }
 
+    public void Dispose()
+    {
+        if (!_disposed)
+        {
+            _saveLock.Dispose();
+            _disposed = true;
+        }
+    }
+
     private static float CosineSimilarity(float[] a, float[] b)
     {
         if (a.Length != b.Length || a.Length == 0) return 0f;
-        float dot = 0, normA = 0, normB = 0;
+
+        // Guard against zero- or near-zero norm vectors to avoid NaN/Infinity
+        float sumSqA = 0, sumSqB = 0;
         for (int i = 0; i < a.Length; i++)
         {
-            dot += a[i] * b[i];
-            normA += a[i] * a[i];
-            normB += b[i] * b[i];
+            sumSqA += a[i] * a[i];
+            sumSqB += b[i] * b[i];
         }
-        if (normA < 1e-12f || normB < 1e-12f) return 0f;
-        return dot / (MathF.Sqrt(normA) * MathF.Sqrt(normB));
+
+        const float epsilon = 1e-8f;
+        if (sumSqA < epsilon || sumSqB < epsilon)
+            return 0f;
+
+        return TensorPrimitives.CosineSimilarity(a.AsSpan(), b.AsSpan());
     }
 }

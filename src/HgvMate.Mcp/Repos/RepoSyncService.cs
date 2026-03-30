@@ -577,7 +577,8 @@ public class RepoSyncService : BackgroundService
         process.StartInfo = new System.Diagnostics.ProcessStartInfo
         {
             FileName = "git",
-            Arguments = string.Join(" ", args.Select(a => a.Contains(' ') ? $"\"{a}\"" : a)),
+            Arguments = string.Join(" ", args.Select(a =>
+                a.Contains(' ') || a.Contains('"') ? $"\"{a.Replace("\"", "\\\"")}\"" : a)),
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -630,5 +631,12 @@ public class RepoSyncService : BackgroundService
         {
             _logger.LogWarning(ex, "Could not check disk space for '{Path}'. Proceeding with clone.", targetPath);
         }
+    }
+
+    public override void Dispose()
+    {
+        _syncSemaphore.Dispose();
+        _gitNexusSemaphore.Dispose();
+        base.Dispose();
     }
 }

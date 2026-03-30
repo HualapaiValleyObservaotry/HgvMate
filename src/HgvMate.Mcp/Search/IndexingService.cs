@@ -14,6 +14,9 @@ public record IndexResult(
 
 public class IndexingService
 {
+    /// <summary>Maximum file size for indexing (5 MB). Prevents OOM from large auto-generated files.</summary>
+    private const long MaxIndexableFileSize = 5 * 1024 * 1024;
+
     private static readonly string[] TextExtensions =
     [
         ".cs", ".ts", ".js", ".tsx", ".jsx", ".py", ".java", ".go", ".rs",
@@ -76,8 +79,12 @@ public class IndexingService
             return new IndexResult(0, 0, 0, [], TimeSpan.Zero);
         }
 
-        _vectorStore.DeleteChunksForRepo(repoName);
-
+        // Build new chunks into a staging list first, then atomically swap (delete old + upsert new).
+        // This avoids a data gap if indexing fails midway — old chunks remain searchable until success.
+        // NOTE: This temporarily holds both old (in-cache) and new chunks in memory. For very large
+        // repos this could be significant. If memory pressure becomes an issue, consider streaming
+        // chunks to a temporary on-disk store or incremental upsert-with-rollback.
+        var allNewChunks = new List<SourceChunk>();
         var files = GetIndexableFiles(repoRoot);
         int fileCount = 0, chunkCount = 0, skippedCount = 0;
         var skippedFiles = new List<string>();
@@ -91,7 +98,6 @@ public class IndexingService
                 var relativePath = Path.GetRelativePath(repoRoot, filePath);
                 var content = await File.ReadAllTextAsync(filePath, cancellationToken);
                 var chunks = ChunkText(content);
-                var sourceChunks = new List<SourceChunk>();
 
                 // Process chunks in batches for efficient ONNX inference
                 for (int batchStart = 0; batchStart < chunks.Count; batchStart += batchSize)
@@ -101,12 +107,11 @@ public class IndexingService
 
                     for (int j = 0; j < batch.Count; j++)
                     {
-                        sourceChunks.Add(new SourceChunk(repoName, relativePath, batchStart + j, batch[j], embeddings[j]));
+                        allNewChunks.Add(new SourceChunk(repoName, relativePath, batchStart + j, batch[j], embeddings[j]));
                         chunkCount++;
                     }
                 }
 
-                _vectorStore.UpsertChunks(sourceChunks);
                 fileCount++;
             }
             catch (Exception ex)
@@ -116,6 +121,10 @@ public class IndexingService
                 skippedFiles.Add(Path.GetRelativePath(repoRoot, filePath));
             }
         }
+
+        // Atomic swap: delete old chunks and insert new ones
+        _vectorStore.DeleteChunksForRepo(repoName);
+        _vectorStore.UpsertChunks(allNewChunks);
 
         if (!deferSave)
             await _vectorStore.SaveAsync();
@@ -209,7 +218,20 @@ public class IndexingService
 
         var sep = Path.DirectorySeparatorChar;
         string[] excludedDirs = [".git", ".gitnexus", "node_modules", "bin", "obj"];
-        return !excludedDirs.Any(d => filePath.Contains(sep + d + sep));
+        if (excludedDirs.Any(d => filePath.Contains(sep + d + sep)))
+            return false;
+
+        // Skip files that are too large to index safely
+        try
+        {
+            var fileInfo = new FileInfo(filePath);
+            if (fileInfo.Exists && fileInfo.Length > MaxIndexableFileSize)
+                return false;
+        }
+        catch (IOException) { /* file may not exist or be inaccessible; allow indexing attempt */ }
+        catch (UnauthorizedAccessException) { /* insufficient permissions; allow indexing attempt */ }
+
+        return true;
     }
 
     private static IEnumerable<string> GetIndexableFiles(string root)

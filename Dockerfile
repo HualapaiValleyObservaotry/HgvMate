@@ -64,17 +64,18 @@ ENV HF_ONNX_BASE="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/
 
 # Download architecture-specific quantized ONNX models (~23 MB each, faster CPU inference)
 # and FP32 model as fallback (~90 MB). OnnxEmbedder picks the best match at runtime.
+# --retry 3 handles transient download failures during Docker build.
 RUN mkdir -p /app/models && \
   if [ "$TARGETARCH" = "arm64" ]; then \
-  curl -fSL -o /app/models/model_qint8_arm64.onnx \
+  curl -fSL --retry 3 --retry-delay 5 -o /app/models/model_qint8_arm64.onnx \
   "${HF_ONNX_BASE}model_qint8_arm64.onnx" ; \
   else \
-  curl -fSL -o /app/models/model_quint8_avx2.onnx \
+  curl -fSL --retry 3 --retry-delay 5 -o /app/models/model_quint8_avx2.onnx \
   "${HF_ONNX_BASE}model_quint8_avx2.onnx" && \
-  curl -fSL -o /app/models/model_qint8_avx512_vnni.onnx \
+  curl -fSL --retry 3 --retry-delay 5 -o /app/models/model_qint8_avx512_vnni.onnx \
   "${HF_ONNX_BASE}model_qint8_avx512_vnni.onnx" ; \
   fi && \
-  curl -fSL -o /app/models/model.onnx \
+  curl -fSL --retry 3 --retry-delay 5 -o /app/models/model.onnx \
   "${HF_ONNX_BASE}model.onnx"
 
 VOLUME /data
@@ -84,8 +85,11 @@ ENV RepoSync__ClonePath=/tmp/hgvmate/repos
 # Reserve 1 GB free space on ephemeral disk to prevent filling it
 ENV RepoSync__MinFreeDiskSpaceMb=1024
 ENV ASPNETCORE_URLS=http://+:5000
-# Repos cloned by previous containers may have different UIDs on the /data volume
+# Repos cloned by previous containers may have different UIDs on the /data volume.
+# Scope safe.directory to only the specific paths used by HgvMate (not global wildcard).
 RUN git config --global --add safe.directory /data && \
-  git config --global --add safe.directory /tmp/hgvmate/repos
+  git config --global --add safe.directory '/data/*' && \
+  git config --global --add safe.directory /tmp/hgvmate/repos && \
+  git config --global --add safe.directory '/tmp/hgvmate/repos/*'
 ENTRYPOINT ["/app/HgvMate.Mcp"]
 

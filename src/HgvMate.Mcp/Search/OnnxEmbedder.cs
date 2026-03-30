@@ -274,7 +274,10 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
             if (File.Exists(dataPath)) return dataPath;
         }
 
-        // 3. Auto-download broadest-compat quantized model to data path
+        // 3. Auto-download broadest-compat quantized model to data path.
+        // This path only runs in local dev when the model is missing (Docker images pre-bake models).
+        // Synchronous download is intentional: the constructor must complete before the embedder is used,
+        // and this only runs once when the model file is absent.
         var (downloadName, downloadUrl) = DefaultQuantizedDownload;
         var downloadPath = Path.Combine(options.DataPath, "models", downloadName);
         _logger.LogInformation("ONNX model not found locally. Downloading {Model} from Hugging Face...", downloadName);
@@ -287,10 +290,8 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
             httpClient.Timeout = TimeSpan.FromMinutes(10);
 
             var tempPath = downloadPath + ".download";
-            // NOTE: Synchronous download in constructor. The model is pre-baked in Docker images,
-            // so this path only runs in local dev when the model is missing. WarmupService handles
-            // async startup; this fallback blocks briefly to ensure the embedder is ready.
-            using (var response = httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
+            using var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
+            using (var response = httpClient.Send(request, HttpCompletionOption.ResponseHeadersRead))
             {
                 response.EnsureSuccessStatusCode();
                 using var stream = response.Content.ReadAsStream();
@@ -316,40 +317,54 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
         _logger = logger;
     }
 
-    public Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken = default)
+    public async Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken = default)
     {
         if (_session == null)
-            return Task.FromResult(new float[EmbeddingDimensions]);
+            return new float[EmbeddingDimensions];
+
+        cancellationToken.ThrowIfCancellationRequested();
 
         try
         {
-            var sw = Stopwatch.StartNew();
-            var tokens = SimpleTokenize(text);
-            var embedding = RunSingleInference(tokens);
-            var result = Normalize(embedding);
-            sw.Stop();
+            return await Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var sw = Stopwatch.StartNew();
+                var tokens = SimpleTokenize(text);
+                var embedding = RunSingleInference(tokens);
+                var result = Normalize(embedding);
+                sw.Stop();
 
-            HgvMateDiagnostics.OnnxInferenceTotal.Add(1);
-            HgvMateDiagnostics.OnnxInferenceDuration.Record(sw.Elapsed.TotalMilliseconds);
+                HgvMateDiagnostics.OnnxInferenceTotal.Add(1);
+                HgvMateDiagnostics.OnnxInferenceDuration.Record(sw.Elapsed.TotalMilliseconds);
 
-            return Task.FromResult(result);
+                return result;
+            }, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Embedding failed.");
-            return Task.FromResult(new float[EmbeddingDimensions]);
+            return new float[EmbeddingDimensions];
         }
     }
 
-    public Task<IReadOnlyList<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken = default)
     {
         if (_session == null || texts.Count == 0)
-            return Task.FromResult<IReadOnlyList<float[]>>(
-                texts.Select(_ => new float[EmbeddingDimensions]).ToList());
+            return texts.Select(_ => new float[EmbeddingDimensions]).ToList();
+
+        cancellationToken.ThrowIfCancellationRequested();
 
         try
         {
-            var sw = Stopwatch.StartNew();
+            return await Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var sw = Stopwatch.StartNew();
 
             // Tokenize all texts
             var allTokens = texts.Select(SimpleTokenize).ToList();
@@ -401,17 +416,21 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
                 embeddings.Add(Normalize(embedding));
             }
 
-            sw.Stop();
-            HgvMateDiagnostics.OnnxInferenceTotal.Add(1);
-            HgvMateDiagnostics.OnnxBatchDuration.Record(sw.Elapsed.TotalMilliseconds);
+             sw.Stop();
+                HgvMateDiagnostics.OnnxInferenceTotal.Add(1);
+                HgvMateDiagnostics.OnnxBatchDuration.Record(sw.Elapsed.TotalMilliseconds);
 
-            return Task.FromResult<IReadOnlyList<float[]>>(embeddings);
+                return (IReadOnlyList<float[]>)embeddings;
+            }, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Batch embedding failed for {Count} texts.", texts.Count);
-            return Task.FromResult<IReadOnlyList<float[]>>(
-                texts.Select(_ => new float[EmbeddingDimensions]).ToList());
+            return texts.Select(_ => new float[EmbeddingDimensions]).ToList();
         }
     }
 
@@ -454,10 +473,15 @@ public class OnnxEmbedder : IOnnxEmbedder, IDisposable
 
     private static float[] Normalize(float[] v)
     {
-        double sumSq = v.Sum(x => (double)x * x);
+        double sumSq = 0;
+        for (int i = 0; i < v.Length; i++)
+            sumSq += (double)v[i] * v[i];
         if (sumSq < 1e-12) return v;
         float norm = (float)Math.Sqrt(sumSq);
-        return v.Select(x => x / norm).ToArray();
+        var result = new float[v.Length];
+        for (int i = 0; i < v.Length; i++)
+            result[i] = v[i] / norm;
+        return result;
     }
 
     // Minimal whitespace tokenizer — maps words to token IDs within the model's vocabulary range.
