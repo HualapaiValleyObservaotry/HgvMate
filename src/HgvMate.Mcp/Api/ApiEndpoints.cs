@@ -146,25 +146,31 @@ public static class ApiEndpoints
         repos.MapPost("/", async (AddRepoRequest request, IRepoRegistry registry, RepoSyncService syncService, ILogger<RepoSyncService> logger) =>
         {
             if (string.IsNullOrWhiteSpace(request.Name))
-                return Results.BadRequest(new { error = "name is required." });
+                return Results.Problem(detail: "name is required.", statusCode: StatusCodes.Status400BadRequest);
             if (request.Name.Length > 128)
-                return Results.BadRequest(new { error = "name must be 128 characters or fewer." });
+                return Results.Problem(detail: "name must be 128 characters or fewer.", statusCode: StatusCodes.Status400BadRequest);
             if (string.IsNullOrWhiteSpace(request.Url))
-                return Results.BadRequest(new { error = "url is required." });
+                return Results.Problem(detail: "url is required.", statusCode: StatusCodes.Status400BadRequest);
 
             var validSources = new[] { "github", "azuredevops" };
             var source = request.Source ?? "github";
             if (!validSources.Contains(source, StringComparer.OrdinalIgnoreCase))
-                return Results.BadRequest(new { error = $"source must be one of: {string.Join(", ", validSources)}." });
+                return Results.Problem(
+                    detail: $"source must be one of: {string.Join(", ", validSources)}.",
+                    statusCode: StatusCodes.Status400BadRequest);
 
             var existing = await registry.GetByNameAsync(request.Name);
             if (existing != null)
-                return Results.Conflict(new { error = $"Repository '{request.Name}' already exists." });
+                return Results.Problem(
+                    detail: $"Repository '{request.Name}' already exists.",
+                    statusCode: StatusCodes.Status409Conflict);
 
             var existingUrl = await registry.GetByUrlAsync(request.Url);
             if (existingUrl != null)
-                return Results.Conflict(new { error = $"A repository with the same URL is already registered as '{existingUrl.Name}' (branch: {existingUrl.Branch}). " +
-                    "Adding the same repo with a different branch would create mostly duplicate search results." });
+                return Results.Problem(
+                    detail: $"A repository with the same URL is already registered as '{existingUrl.Name}' (branch: {existingUrl.Branch}). " +
+                            "Adding the same repo with a different branch would create mostly duplicate search results.",
+                    statusCode: StatusCodes.Status409Conflict);
 
             var repo = await registry.AddAsync(request.Name, request.Url, request.Branch ?? "main", source.ToLowerInvariant(), addedBy: "rest-api");
             _ = Task.Run(async () =>
@@ -190,7 +196,9 @@ public static class ApiEndpoints
         {
             var repo = await registry.GetByNameAsync(name);
             if (repo == null)
-                return Results.NotFound(new { error = $"Repository '{name}' not found." });
+                return Results.Problem(
+                    detail: $"Repository '{name}' not found.",
+                    statusCode: StatusCodes.Status404NotFound);
 
             try
             {
@@ -207,7 +215,9 @@ public static class ApiEndpoints
         {
             var repo = await registry.GetByNameAsync(name);
             if (repo == null)
-                return Results.NotFound(new { error = $"Repository '{name}' not found." });
+                return Results.Problem(
+                    detail: $"Repository '{name}' not found.",
+                    statusCode: StatusCodes.Status404NotFound);
 
             var isForce = force == true;
             _ = Task.Run(async () =>
@@ -237,7 +247,9 @@ public static class ApiEndpoints
         {
             var repo = await registry.GetByNameAsync(name);
             if (repo == null)
-                return Results.NotFound(new { error = $"Repository '{name}' not found." });
+                return Results.Problem(
+                    detail: $"Repository '{name}' not found.",
+                    statusCode: StatusCodes.Status404NotFound);
 
             return Results.Ok(new
             {
@@ -279,21 +291,34 @@ public static class ApiEndpoints
 
     private static void MapSearchEndpoints(RouteGroupBuilder api)
     {
-        api.MapGet("/search", async (string query, string? repository, HybridSearchService search) =>
+        api.MapGet("/search", async (
+            string query,
+            string? repository,
+            string? includeExtensions,
+            string? excludePatterns,
+            HybridSearchService search) =>
         {
             if (string.IsNullOrWhiteSpace(query))
-                return Results.BadRequest(new { error = "query parameter is required." });
+                return Results.Problem(detail: "query parameter is required.", statusCode: StatusCodes.Status400BadRequest);
 
-            var results = await search.SearchAsync(query, repository);
+            var extensions = string.IsNullOrWhiteSpace(includeExtensions)
+                ? null
+                : includeExtensions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var excludes = string.IsNullOrWhiteSpace(excludePatterns)
+                ? null
+                : excludePatterns.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            var results = await search.SearchAsync(query, repository, extensions, excludes);
             return Results.Ok(results);
         })
         .WithTags("Search")
-        .WithSummary("Search source code using text and semantic search");
+        .WithSummary("Search source code using text and semantic search. " +
+                     "Optional: includeExtensions (.cs,.ts) and excludePatterns (*.min.js,package-lock.json).");
 
         api.MapGet("/repositories/{repository}/files/{*path}", async (string repository, string path, SourceCodeReader reader) =>
         {
             if (string.IsNullOrWhiteSpace(path))
-                return Results.BadRequest(new { error = "path is required." });
+                return Results.Problem(detail: "path is required.", statusCode: StatusCodes.Status400BadRequest);
 
             try
             {
@@ -302,15 +327,88 @@ public static class ApiEndpoints
             }
             catch (UnauthorizedAccessException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
             }
             catch (FileNotFoundException ex)
             {
-                return Results.NotFound(new { error = ex.Message });
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status404NotFound);
             }
         })
         .WithTags("Search")
         .WithSummary("Read a source file from a cloned repository");
+
+        api.MapGet("/repositories/{repository}/tree", async (
+            string repository,
+            string? path,
+            int? depth,
+            SourceCodeReader reader) =>
+        {
+            if (depth.HasValue && (depth < 1 || depth > 10))
+                return Results.Problem(detail: "depth must be between 1 and 10.", statusCode: StatusCodes.Status400BadRequest);
+
+            try
+            {
+                var entries = await reader.GetRepoTreeAsync(repository, path, depth ?? 2);
+                return Results.Ok(new { repository, path, depth = depth ?? 2, entries });
+            }
+            catch (DirectoryNotFoundException ex)
+            {
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status404NotFound);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+            }
+        })
+        .WithTags("Search")
+        .WithSummary("List the file/folder tree of a repository up to the given depth (default: 2). " +
+                     "Folders deeper than the limit are collapsed with a trailing '/'. " +
+                     "Optional: path (subtree prefix), depth (1-10).");
+
+        api.MapGet("/repositories/{repository}/find", async (
+            string repository,
+            string pattern,
+            SourceCodeReader reader) =>
+        {
+            if (string.IsNullOrWhiteSpace(pattern))
+                return Results.Problem(detail: "pattern query parameter is required.", statusCode: StatusCodes.Status400BadRequest);
+
+            try
+            {
+                var files = await reader.FindFilesAsync(repository, pattern);
+                return Results.Ok(new { repository, pattern, count = files.Count, files });
+            }
+            catch (DirectoryNotFoundException ex)
+            {
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status404NotFound);
+            }
+        })
+        .WithTags("Search")
+        .WithSummary("Find files matching a glob pattern in a repository (e.g. '*.csproj', '*Controller.cs').");
+
+        api.MapGet("/repositories/{repository}/techstack", async (
+            string repository,
+            SourceCodeReader reader) =>
+        {
+            try
+            {
+                var content = await reader.GetFileAsync(repository, ".hgvmate/techstack.yml");
+                return Results.Ok(new { repository, content });
+            }
+            catch (FileNotFoundException)
+            {
+                return Results.Problem(
+                    detail: $"No .hgvmate/techstack.yml found for repository '{repository}'. " +
+                            "Create and commit this file in the repository root to enable tech-stack awareness.",
+                    statusCode: StatusCodes.Status404NotFound);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+            }
+        })
+        .WithTags("Search")
+        .WithSummary("Return the '.hgvmate/techstack.yml' metadata file for the repository.");
     }
 
     // ── Structural analysis ─────────────────────────────────────────────
@@ -322,7 +420,7 @@ public static class ApiEndpoints
         structural.MapGet("/symbols/{name}", async (string name, string? repository, GitNexusService gitNexus) =>
         {
             if (string.IsNullOrWhiteSpace(name))
-                return Results.BadRequest(new { error = "name is required." });
+                return Results.Problem(detail: "name is required.", statusCode: StatusCodes.Status400BadRequest);
 
             var result = await gitNexus.FindSymbolAsync(name, repository);
             return Results.Ok(new { symbol = name, repository, result });
@@ -332,7 +430,7 @@ public static class ApiEndpoints
         structural.MapGet("/references/{name}", async (string name, string? repository, GitNexusService gitNexus) =>
         {
             if (string.IsNullOrWhiteSpace(name))
-                return Results.BadRequest(new { error = "name is required." });
+                return Results.Problem(detail: "name is required.", statusCode: StatusCodes.Status400BadRequest);
 
             var result = await gitNexus.GetReferencesAsync(name, repository);
             return Results.Ok(new { symbol = name, repository, result });
@@ -342,7 +440,7 @@ public static class ApiEndpoints
         structural.MapGet("/callchain/{name}", async (string name, string? repository, GitNexusService gitNexus) =>
         {
             if (string.IsNullOrWhiteSpace(name))
-                return Results.BadRequest(new { error = "name is required." });
+                return Results.Problem(detail: "name is required.", statusCode: StatusCodes.Status400BadRequest);
 
             var result = await gitNexus.GetCallChainAsync(name, repository);
             return Results.Ok(new { symbol = name, repository, result });
@@ -352,7 +450,7 @@ public static class ApiEndpoints
         structural.MapGet("/impact/{name}", async (string name, string? repository, GitNexusService gitNexus) =>
         {
             if (string.IsNullOrWhiteSpace(name))
-                return Results.BadRequest(new { error = "name is required." });
+                return Results.Problem(detail: "name is required.", statusCode: StatusCodes.Status400BadRequest);
 
             var result = await gitNexus.GetImpactAsync(name, repository);
             return Results.Ok(new { symbol = name, repository, result });

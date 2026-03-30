@@ -120,4 +120,104 @@ public sealed class SourceCodeToolsTests
         var result = await _tools.GetFileContent("no-such-repo", "test.txt");
         StringAssert.Contains(result, "Error");
     }
+
+    // ── GetRepoTree ─────────────────────────────────────────────────────
+
+    [TestMethod]
+    public async Task GetRepoTree_EmptyRepositoryName_ReturnsError()
+    {
+        var result = await _tools.GetRepoTree("");
+        StringAssert.Contains(result, "Error");
+    }
+
+    [TestMethod]
+    public async Task GetRepoTree_DepthZero_ReturnsError()
+    {
+        var result = await _tools.GetRepoTree("testrepo", depth: 0);
+        StringAssert.Contains(result, "Error");
+    }
+
+    [TestMethod]
+    public async Task GetRepoTree_DepthTooLarge_ReturnsError()
+    {
+        var result = await _tools.GetRepoTree("testrepo", depth: 11);
+        StringAssert.Contains(result, "Error");
+    }
+
+    [TestMethod]
+    public async Task GetRepoTree_NotClonedRepo_ReturnsError()
+    {
+        var result = await _tools.GetRepoTree("no-such-repo");
+        StringAssert.Contains(result, "Error");
+    }
+
+    // ── FindFiles ───────────────────────────────────────────────────────
+
+    [TestMethod]
+    public async Task FindFiles_EmptyRepositoryName_ReturnsError()
+    {
+        var result = await _tools.FindFiles("", "*.txt");
+        StringAssert.Contains(result, "Error");
+    }
+
+    [TestMethod]
+    public async Task FindFiles_EmptyPattern_ReturnsError()
+    {
+        var result = await _tools.FindFiles("testrepo", "");
+        StringAssert.Contains(result, "Error");
+    }
+
+    [TestMethod]
+    public async Task FindFiles_NotClonedRepo_ReturnsError()
+    {
+        var result = await _tools.FindFiles("no-such-repo", "*.txt");
+        StringAssert.Contains(result, "Error");
+    }
+
+    // ── GetTechStack ────────────────────────────────────────────────────
+
+    [TestMethod]
+    public async Task GetTechStack_EmptyRepositoryName_ReturnsError()
+    {
+        var result = await _tools.GetTechStack("");
+        StringAssert.Contains(result, "Error");
+    }
+
+    [TestMethod]
+    public async Task GetTechStack_NoTechStackFile_ReturnsNotFoundMessage()
+    {
+        var result = await _tools.GetTechStack("testrepo");
+        // No .hgvmate/techstack.yml exists, should return a helpful message
+        StringAssert.Contains(result, "techstack.yml");
+    }
+
+    [TestMethod]
+    public async Task GetTechStack_ExistingTechStackFile_ReturnsContent()
+    {
+        // Create the .hgvmate/techstack.yml file in the test repo
+        var hgvDir = Path.Combine(_tempDir, "repos", "testrepo", ".hgvmate");
+        Directory.CreateDirectory(hgvDir);
+        const string techstackContent = "name: testrepo\nlanguage: C#\n";
+        File.WriteAllText(Path.Combine(hgvDir, "techstack.yml"), techstackContent);
+
+        var result = await _tools.GetTechStack("testrepo");
+        Assert.AreEqual(techstackContent, result);
+    }
+
+    // ── SearchSourceCode with filters ───────────────────────────────────
+
+    [TestMethod]
+    public async Task SearchSourceCode_WithIncludeExtensions_ValidQuery_ReturnsResult()
+    {
+        var result = await _tools.SearchSourceCode("hello", includeExtensions: ".cs,.ts");
+        // No git repos indexed so just verify it doesn't crash and returns a clean response
+        Assert.IsFalse(string.IsNullOrEmpty(result));
+    }
+
+    [TestMethod]
+    public async Task SearchSourceCode_WithExcludePatterns_ValidQuery_ReturnsResult()
+    {
+        var result = await _tools.SearchSourceCode("hello", excludePatterns: "*.min.js,package-lock.json");
+        Assert.IsFalse(string.IsNullOrEmpty(result));
+    }
 }

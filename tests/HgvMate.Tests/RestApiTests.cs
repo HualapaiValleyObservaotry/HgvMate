@@ -284,6 +284,139 @@ public sealed class RestApiTests : IDisposable
         Assert.IsTrue(body.TryGetProperty("queueDepth", out _));
     }
 
+    [TestMethod]
+    public async Task AddRepository_MissingName_ReturnsProblemDetails()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var response = await client.PostAsJsonAsync("/api/repositories", new { name = "", url = "https://x.git" });
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.IsTrue(body.TryGetProperty("status", out var status), "ProblemDetails must have 'status'");
+        Assert.AreEqual(400, status.GetInt32());
+        Assert.IsTrue(body.TryGetProperty("detail", out _), "ProblemDetails must have 'detail'");
+    }
+
+    [TestMethod]
+    public async Task AddRepository_Conflict_ReturnsProblemDetails()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var repo = new { name = "conflict-repo", url = "https://github.com/example/conflict.git" };
+        await client.PostAsJsonAsync("/api/repositories", repo);
+        var response = await client.PostAsJsonAsync("/api/repositories", repo);
+
+        Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.IsTrue(body.TryGetProperty("status", out var status), "ProblemDetails must have 'status'");
+        Assert.AreEqual(409, status.GetInt32());
+        Assert.IsTrue(body.TryGetProperty("detail", out _), "ProblemDetails must have 'detail'");
+    }
+
+    [TestMethod]
+    public async Task GetRepositoryStatus_NotFound_ReturnsProblemDetails()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/api/repositories/ghost/status");
+
+        Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.IsTrue(body.TryGetProperty("status", out var status), "ProblemDetails must have 'status'");
+        Assert.AreEqual(404, status.GetInt32());
+        Assert.IsTrue(body.TryGetProperty("detail", out _), "ProblemDetails must have 'detail'");
+    }
+
+    [TestMethod]
+    public async Task Search_WithIncludeExtensions_ReturnsOk()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/api/search?query=hello&includeExtensions=.cs,.ts");
+
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task Search_WithExcludePatterns_ReturnsOk()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/api/search?query=hello&excludePatterns=*.min.js,package-lock.json");
+
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task GetRepoTree_UnknownRepo_ReturnsNotFound()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/api/repositories/no-such-repo/tree");
+
+        Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.IsTrue(body.TryGetProperty("status", out var status));
+        Assert.AreEqual(404, status.GetInt32());
+    }
+
+    [TestMethod]
+    public async Task GetRepoTree_InvalidDepth_ReturnsBadRequest()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/api/repositories/some-repo/tree?depth=0");
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task FindFiles_MissingPattern_ReturnsBadRequest()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/api/repositories/some-repo/find?pattern=");
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task FindFiles_UnknownRepo_ReturnsNotFound()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/api/repositories/no-such-repo/find?pattern=*.cs");
+
+        Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.IsTrue(body.TryGetProperty("status", out var status));
+        Assert.AreEqual(404, status.GetInt32());
+    }
+
+    [TestMethod]
+    public async Task GetTechStack_UnknownRepo_ReturnsNotFound()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/api/repositories/no-such-repo/techstack");
+
+        Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.IsTrue(body.TryGetProperty("status", out var status));
+        Assert.AreEqual(404, status.GetInt32());
+    }
+
     // ── Test app factory ────────────────────────────────────────────────
 
     private async Task<WebApplication> CreateTestApp(bool markReady = true)
@@ -323,6 +456,7 @@ public sealed class RestApiTests : IDisposable
         });
 
         builder.Services.AddOpenApi();
+        builder.Services.AddProblemDetails();
 
         builder.Services.AddMcpServer()
             .WithHttpTransport()

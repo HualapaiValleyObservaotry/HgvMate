@@ -35,6 +35,8 @@ public class HybridSearchService
     public async Task<IReadOnlyList<SearchResult>> SearchAsync(
         string query,
         string? repositoryName = null,
+        string[]? includeExtensions = null,
+        string[]? excludePatterns = null,
         CancellationToken cancellationToken = default)
     {
         using var activity = HgvMateDiagnostics.ActivitySource.StartActivity("Search");
@@ -63,10 +65,31 @@ public class HybridSearchService
                     results.Add(new SearchResult(r.RepoName, r.FilePath, 0, r.Content, r.Score));
             }
 
-            return results
-                .OrderByDescending(r => r.Score)
-                .Take(_searchOptions.MaxResults)
-                .ToList();
+            IEnumerable<SearchResult> filtered = results.OrderByDescending(r => r.Score);
+
+            // Apply extension filter
+            if (includeExtensions?.Length > 0)
+            {
+                var exts = includeExtensions
+                    .Select(e => e.StartsWith('.') ? e : '.' + e)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                filtered = filtered.Where(r => exts.Contains(Path.GetExtension(r.FilePath)));
+            }
+
+            // Apply exclude-pattern filter
+            if (excludePatterns?.Length > 0)
+            {
+                filtered = filtered.Where(r =>
+                {
+                    var normalizedPath = r.FilePath.Replace('\\', '/');
+                    var fileName = Path.GetFileName(r.FilePath);
+                    return !excludePatterns.Any(p =>
+                        System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(p, normalizedPath, ignoreCase: true) ||
+                        System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(p, fileName, ignoreCase: true));
+                });
+            }
+
+            return filtered.Take(_searchOptions.MaxResults).ToList();
         }
         finally
         {
