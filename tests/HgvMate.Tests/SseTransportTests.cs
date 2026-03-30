@@ -180,7 +180,8 @@ public sealed class SseTransportTests : IDisposable
             .WithTools<AdminTools>()
             .WithTools<SourceCodeTools>()
             .WithTools<StructuralTools>()
-            .WithTools<UsageReportTools>();
+            .WithTools<UsageReportTools>()
+            .WithTools<ServerInfoTools>();
 
         var app = builder.Build();
 

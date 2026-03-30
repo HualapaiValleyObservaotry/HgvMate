@@ -5,9 +5,25 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Version info — overridden by CI via -p:Version= and -p:InformationalVersion= -->
+    <Version>1.3.0</Version>
     <!-- ONNX execution provider: cpu (default), cuda, directml, openvino -->
     <OnnxProvider Condition="'$(OnnxProvider)' == ''">cpu</OnnxProvider>
+    <!-- Build metadata — set by CI, fallback to dev values -->
+    <GitSha Condition="'$(GitSha)' == ''">dev</GitSha>
+    <BuildDate Condition="'$(BuildDate)' == ''">$([System.DateTime]::UtcNow.ToString("o"))</BuildDate>
   </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>GitSha</_Parameter1>
+      <_Parameter2>$(GitSha)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>BuildDate</_Parameter1>
+      <_Parameter2>$(BuildDate)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="HVO.Enterprise.Telemetry" Version="1.0.3" />

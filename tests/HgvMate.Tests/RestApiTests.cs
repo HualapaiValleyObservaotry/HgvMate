@@ -467,6 +467,60 @@ public sealed class RestApiTests : IDisposable
         Assert.AreEqual(404, status.GetInt32());
     }
 
+    [TestMethod]
+    public async Task ServerInfo_ReturnsVersionAndCapabilities()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/api/server-info");
+
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.IsTrue(body.TryGetProperty("name", out var name));
+        Assert.AreEqual("HgvMate", name.GetString());
+        Assert.IsTrue(body.TryGetProperty("version", out _));
+        Assert.IsTrue(body.TryGetProperty("gitSha", out _));
+        Assert.IsTrue(body.TryGetProperty("buildDate", out _));
+        Assert.IsTrue(body.TryGetProperty("uptime", out _));
+        Assert.IsTrue(body.TryGetProperty("capabilities", out var caps));
+        Assert.IsTrue(caps.TryGetProperty("vectorSearch", out _));
+        Assert.IsTrue(caps.TryGetProperty("structuralAnalysis", out _));
+        Assert.IsTrue(body.TryGetProperty("endpoints", out _));
+    }
+
+    [TestMethod]
+    public async Task Health_IncludesVersionInfo()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/health");
+
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.IsTrue(body.TryGetProperty("version", out _));
+        Assert.IsTrue(body.TryGetProperty("gitSha", out _));
+        Assert.IsTrue(body.TryGetProperty("buildDate", out _));
+    }
+
+    [TestMethod]
+    public async Task Diagnostics_ReturnsAtBothPaths()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var response1 = await client.GetAsync("/diagnostics");
+        Assert.AreEqual(HttpStatusCode.OK, response1.StatusCode);
+        var body1 = await response1.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.IsTrue(body1.TryGetProperty("uptime", out _));
+
+        var response2 = await client.GetAsync("/api/diagnostics");
+        Assert.AreEqual(HttpStatusCode.OK, response2.StatusCode);
+        var body2 = await response2.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.IsTrue(body2.TryGetProperty("uptime", out _));
+    }
+
     // ── Test app factory ────────────────────────────────────────────────
 
     private async Task<WebApplication> CreateTestApp(bool markReady = true)
@@ -515,7 +569,8 @@ public sealed class RestApiTests : IDisposable
             .WithTools<AdminTools>()
             .WithTools<SourceCodeTools>()
             .WithTools<StructuralTools>()
-            .WithTools<UsageReportTools>();
+            .WithTools<UsageReportTools>()
+            .WithTools<ServerInfoTools>();
 
         var app = builder.Build();
 

@@ -1,18 +1,23 @@
 # ── Stage 1: build ────────────────────────────────────────────────────────────
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG TARGETARCH
+ARG GIT_SHA=dev
+ARG BUILD_DATE
 WORKDIR /src
 COPY . .
 # amd64 → OpenVINO (Managed NuGet + external native libs from GitHub Release)
 # arm64 → standard ORT NuGet (native libs bundled in package)
 RUN dotnet_rid="linux-$([ "$TARGETARCH" = "amd64" ] && echo x64 || echo $TARGETARCH)" && \
   onnx_provider=$([ "$TARGETARCH" = "amd64" ] && echo openvino || echo cpu) && \
+  build_date="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
   dotnet publish src/HgvMate.Mcp/HgvMate.Mcp.csproj \
   -c Release \
   -r "$dotnet_rid" \
   --self-contained true \
   -p:PublishSingleFile=false \
   -p:OnnxProvider="$onnx_provider" \
+  -p:GitSha="$GIT_SHA" \
+  -p:BuildDate="$build_date" \
   -o /app
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────

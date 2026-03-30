@@ -18,6 +18,7 @@ public static class ApiEndpoints
 
         MapHealthEndpoint(app);
         MapDiagnosticsEndpoint(app);
+        MapServerInfoEndpoint(api);
         MapUsageEndpoints(api);
         MapRepositoryEndpoints(api);
         MapSearchEndpoints(api);
@@ -91,6 +92,9 @@ public static class ApiEndpoints
             return Results.Ok(new
             {
                 Status = failedRepos > 0 ? "degraded" : "healthy",
+                Version = BuildInfo.Version,
+                GitSha = BuildInfo.GitSha,
+                BuildDate = BuildInfo.BuildDate,
                 Uptime = (DateTime.UtcNow - _startTime).ToString(@"d\.hh\:mm\:ss"),
                 Transport = hgvMateOptions.Transport,
                 Embedder = new
@@ -581,30 +585,78 @@ public static class ApiEndpoints
 
     private static void MapDiagnosticsEndpoint(WebApplication app)
     {
-        app.MapGet("/diagnostics", (ITelemetryService telemetry) =>
+        // Mapped at both /diagnostics (legacy) and /api/diagnostics (consistent with REST API)
+        void MapDiagRoute(IEndpointRouteBuilder builder, string path)
         {
-            var stats = telemetry.Statistics;
-            var snapshot = stats.GetSnapshot();
+            builder.MapGet(path, (ITelemetryService telemetry) =>
+            {
+                var stats = telemetry.Statistics;
+                var snapshot = stats.GetSnapshot();
+
+                return Results.Ok(new
+                {
+                    Uptime = snapshot.Uptime.ToString(@"d\.hh\:mm\:ss"),
+                    ActivitiesCreated = snapshot.ActivitiesCreated,
+                    ActivitiesCompleted = snapshot.ActivitiesCompleted,
+                    ActiveActivities = snapshot.ActiveActivities,
+                    ExceptionsTracked = snapshot.ExceptionsTracked,
+                    EventsRecorded = snapshot.EventsRecorded,
+                    MetricsRecorded = snapshot.MetricsRecorded,
+                    QueueDepth = snapshot.QueueDepth,
+                    ItemsProcessed = snapshot.ItemsProcessed,
+                    ItemsDropped = snapshot.ItemsDropped,
+                    ErrorRate = $"{snapshot.CurrentErrorRate:F2}/min",
+                    Throughput = $"{snapshot.CurrentThroughput:F2}/sec",
+                    CorrelationId = CorrelationContext.Current
+                });
+            })
+            .WithTags("System")
+            .WithSummary("Live telemetry statistics — activities, errors, queue depth, throughput");
+        }
+
+        MapDiagRoute(app, "/diagnostics");
+        MapDiagRoute(app, "/api/diagnostics");
+    }
+
+    // ── Server Info ──────────────────────────────────────────────────────
+
+    private static void MapServerInfoEndpoint(RouteGroupBuilder api)
+    {
+        api.MapGet("/server-info", async (
+            IRepoRegistry registry,
+            IOnnxEmbedder embedder,
+            HgvMateOptions options) =>
+        {
+            var repos = await registry.GetAllAsync();
 
             return Results.Ok(new
             {
-                Uptime = snapshot.Uptime.ToString(@"d\.hh\:mm\:ss"),
-                ActivitiesCreated = snapshot.ActivitiesCreated,
-                ActivitiesCompleted = snapshot.ActivitiesCompleted,
-                ActiveActivities = snapshot.ActiveActivities,
-                ExceptionsTracked = snapshot.ExceptionsTracked,
-                EventsRecorded = snapshot.EventsRecorded,
-                MetricsRecorded = snapshot.MetricsRecorded,
-                QueueDepth = snapshot.QueueDepth,
-                ItemsProcessed = snapshot.ItemsProcessed,
-                ItemsDropped = snapshot.ItemsDropped,
-                ErrorRate = $"{snapshot.CurrentErrorRate:F2}/min",
-                Throughput = $"{snapshot.CurrentThroughput:F2}/sec",
-                CorrelationId = CorrelationContext.Current
+                Name = "HgvMate",
+                Version = BuildInfo.Version,
+                GitSha = BuildInfo.GitSha,
+                BuildDate = BuildInfo.BuildDate,
+                Uptime = (DateTime.UtcNow - _startTime).ToString(@"d\.hh\:mm\:ss"),
+                Transport = options.Transport,
+                Capabilities = new
+                {
+                    RepositoryCount = repos.Count,
+                    VectorSearch = embedder.IsAvailable,
+                    StructuralAnalysis = true,
+                    EmbeddingModel = "all-MiniLM-L6-v2",
+                    ExecutionProvider = embedder.ExecutionProvider
+                },
+                Endpoints = new
+                {
+                    Health = "/health",
+                    Repositories = "/api/repositories",
+                    Diagnostics = "/api/diagnostics",
+                    ServerInfo = "/api/server-info",
+                    Mcp = "/mcp"
+                }
             });
         })
         .WithTags("System")
-        .WithSummary("Live telemetry statistics — activities, errors, queue depth, throughput");
+        .WithSummary("Server identity, version, capabilities, and available endpoints");
     }
 }
 

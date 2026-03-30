@@ -64,7 +64,8 @@ if (useSse)
         .WithTools<AdminTools>()
         .WithTools<SourceCodeTools>()
         .WithTools<StructuralTools>()
-        .WithTools<UsageReportTools>();
+        .WithTools<UsageReportTools>()
+        .WithTools<ServerInfoTools>();
 
     var app = builder.Build();
 
@@ -135,7 +136,8 @@ else
         .WithTools<AdminTools>()
         .WithTools<SourceCodeTools>()
         .WithTools<StructuralTools>()
-        .WithTools<UsageReportTools>();
+        .WithTools<UsageReportTools>()
+        .WithTools<ServerInfoTools>();
 
     var app = builder.Build();
 

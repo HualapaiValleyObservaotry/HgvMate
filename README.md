@@ -4,7 +4,7 @@ An MCP (Model Context Protocol) server that provides AI agents with source code 
 
 ## Features
 
-- **11 MCP tools** prefixed `hgvmate_*` — repository management, search, file access, structural analysis
+- **11 MCP tools** prefixed `hgvmate_*` — repository management, search, file access, structural analysis, server info, usage analytics
 - **Dual transport** — stdio (local dev) and SSE/HTTP (remote/container deployment)
 - **Triple-indexed search** — git grep (text), ONNX embeddings (semantic), GitNexus (structural)
 - **REST API** with OpenAPI/Scalar documentation alongside MCP
@@ -12,11 +12,13 @@ An MCP (Model Context Protocol) server that provides AI agents with source code 
 - **SQLite** — single-file database with binary BLOB vector storage and in-memory cache
 - **Docker** — Ubuntu multi-stage build with ONNX model baked in, multi-arch (amd64 + arm64)
 - **In-memory vector cache** — pre-loads embeddings at startup for sub-10ms search
+- **Tool usage logging** — SQLite-backed analytics for monitoring MCP tool usage patterns
 - **116 tests** — unit, integration, protocol, SSE, REST API, live ONNX, and Docker tests
 
 ## Architecture
 
-See [docs/development-plan.md](docs/development-plan.md) for the full design and development plan.
+See [docs/development-plan.md](docs/development-plan.md) for the full design and development plan.  
+See [docs/tech-stack.md](docs/tech-stack.md) for the complete technology stack.
 
 ## Quick Start
 
@@ -116,6 +118,8 @@ Add to `.vscode/mcp.json`:
 | `hgvmate_get_references` | What calls/uses a symbol |
 | `hgvmate_get_call_chain` | Execution flow trace |
 | `hgvmate_get_impact` | Blast radius analysis |
+| `hgvmate_server_info` | Server version, capabilities, and endpoint info |
+| `hgvmate_usage_report` | Tool usage analytics — call counts, patterns, error rates |
 
 ## REST API
 
@@ -137,6 +141,10 @@ When running in SSE/HTTP mode, a REST API is available alongside MCP at `/api/*`
 | GET | `/api/references/{name}?repository=...` | Get references |
 | GET | `/api/callchain/{name}?repository=...` | Call chain trace |
 | GET | `/api/impact/{name}?repository=...` | Blast radius |
+| GET | `/api/server-info` | Server version, capabilities, endpoints |
+| GET | `/api/diagnostics` | Live telemetry statistics |
+| GET | `/api/diagnostics/usage` | Tool usage summary |
+| GET | `/api/diagnostics/usage/patterns` | Usage patterns — repeated searches, tool sequences |
 
 ## Configuration
 
