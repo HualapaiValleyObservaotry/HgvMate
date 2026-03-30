@@ -227,6 +227,12 @@ public sealed class IntegrationTests
             return base.IndexRepoAsync(repoName, cancellationToken);
         }
 
+        public override Task<IndexResult> IndexRepoAsync(string repoName, bool deferSave, CancellationToken cancellationToken = default)
+        {
+            IndexRepoCalls++;
+            return base.IndexRepoAsync(repoName, deferSave, cancellationToken);
+        }
+
         public override Task IndexFileAsync(string repoName, string relativePath, CancellationToken cancellationToken = default)
         {
             IndexFileCalls++;

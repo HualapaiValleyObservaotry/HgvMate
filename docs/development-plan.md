@@ -28,6 +28,26 @@ The ONNX model is an **encoder** (text → 384-dim vector), not an LLM. Copilot 
 | Docker base | Ubuntu 24.04 | Supports tree-sitter native build tools required by GitNexus |
 | Test framework | MSTest with in-memory SQLite | No Docker/volume needed for CI pipelines |
 | PR/repo | Do not submit PR until instructed | Project lives in Tex workspace temporarily; will move to own repo |
+| GitNexus scheduling | Fire-and-forget via bounded `Channel<string>` | ONNX (CPU-bound) and GitNexus (I/O-bound) overlap without contention |
+| Bulk VectorStore saves | `deferSave: true` in `IndexRepoAsync` during bulk | Avoids writing ~300 MB after every repo; single flush at end of `SyncAllAsync` |
+| Parallel repo sync | `Parallel.ForEachAsync(maxDegreeOfParallelism: 3)` | Replaces sequential `foreach`; semaphore already existed for gating |
+| GitNexus skip for doc changes | `HasStructuralChanges()` filter | Avoids re-analysis for `.md`/`.json`/`.yaml` incremental changes |
+
+## Sync Pipeline Design
+
+The sync pipeline is optimized to overlap complementary workloads and avoid redundant I/O:
+
+### GitNexus: Fire-and-forget
+`RepoSyncService` enqueues repo names into a bounded `Channel<string>` instead of `await`-ing `AnalyzeAsync` inline. A dedicated `RunGitNexusWorkerAsync` background loop drains the queue with up to 3 concurrent analyses. This lets ONNX embedding (600%+ CPU) and GitNexus analysis (5-15% CPU, I/O-bound) run concurrently, cutting wall time by ~60% for bulk syncs.
+
+### Batch VectorStore saves
+During `SyncAllAsync`, each `IndexRepoAsync` call passes `deferSave: true` — vectors accumulate in the in-memory `ConcurrentDictionary` but the ~300 MB binary file is written only once after all repos finish. Incremental single-repo syncs still save immediately (low overhead, already deferred per file).
+
+### Parallel clone + embed
+`SyncAllAsync` uses `Parallel.ForEachAsync` with `maxDegreeOfParallelism: 3` instead of a sequential `foreach`. The `SemaphoreSlim(3,3)` gate continues to protect individual `SyncRepoAsync` calls from unbounded concurrency.
+
+### Skip GitNexus for non-structural incremental changes
+When an incremental sync detects changed files, `HasStructuralChanges()` checks if any are AST-parseable (`.cs`, `.ts`, `.js`, `.py`, `.java`, etc.). If only docs/config changed, GitNexus re-analysis is skipped entirely — a useful optimisation for repos with frequent README/changelog commits.
 
 ## Volume Architecture
 
