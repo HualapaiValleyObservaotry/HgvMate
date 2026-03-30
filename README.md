@@ -18,7 +18,7 @@ An MCP (Model Context Protocol) server that provides AI agents with source code 
 ## Architecture
 
 See [docs/development-plan.md](docs/development-plan.md) for the full design and development plan.  
-See [docs/tech-stack.md](docs/tech-stack.md) for the complete technology stack.
+See [.hgvmate/techstack.yml](.hgvmate/techstack.yml) for the technology stack metadata (consumed by `hgvmate_get_techstack`).
 
 ## Quick Start
 
