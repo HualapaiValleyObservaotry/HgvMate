@@ -1,3 +1,4 @@
+using System.Threading.RateLimiting;
 using HgvMate.Mcp.Configuration;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
@@ -183,6 +184,7 @@ public static class ApiEndpoints
                 SyncState = repo.SyncState
             });
         })
+        .RequireRateLimiting("mutating")
         .WithSummary("Add a repository to be indexed");
 
         repos.MapDelete("/{name}", async (string name, IRepoRegistry registry, RepoSyncService syncService) =>
@@ -199,6 +201,7 @@ public static class ApiEndpoints
             await registry.RemoveAsync(name);
             return Results.Ok(new { message = $"Repository '{name}' removed." });
         })
+        .RequireRateLimiting("mutating")
         .WithSummary("Remove a repository and delete its cloned data");
 
         repos.MapPost("/{name}/reindex", async (string name, bool? force, IRepoRegistry registry, RepoSyncService syncService, ILogger<RepoSyncService> logger) =>
@@ -215,6 +218,7 @@ public static class ApiEndpoints
             });
             return Results.Accepted(value: new { message = $"Reindex triggered for '{name}'{(isForce ? " (force)" : "")}." });
         })
+        .RequireRateLimiting("mutating")
         .WithSummary("Trigger reindex for a specific repository. Use ?force=true to re-embed even if unchanged.");
 
         repos.MapPost("/reindex", async (bool? force, IRepoRegistry registry, RepoSyncService syncService, ILogger<RepoSyncService> logger) =>
@@ -227,6 +231,7 @@ public static class ApiEndpoints
             });
             return TypedResults.Ok(new { message = $"Reindex triggered for all repositories{(isForce ? " (force)" : "")}." });
         })
+        .RequireRateLimiting("mutating")
         .WithSummary("Trigger reindex for all repositories. Use ?force=true to re-embed even if unchanged.");
 
         repos.MapGet("/{name}/status", async (string name, IRepoRegistry registry) =>

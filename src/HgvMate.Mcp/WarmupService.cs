@@ -44,17 +44,28 @@ public sealed class WarmupService : BackgroundService
             _startupState.MarkVectorCacheReady();
             HgvMateDiagnostics.SetVectorChunkCount(_vectorStore.CachedChunkCount);
             _logger.LogInformation("Warmup: vector cache ready ({Chunks} chunks).", _vectorStore.CachedChunkCount);
-
-            // ONNX model loads in constructor, just verify it's available
-            _startupState.MarkOnnxReady();
-            _logger.LogInformation("Warmup: ONNX embedder available={Available}.", _embedder.IsAvailable);
-
-            _logger.LogInformation("Warmup: all services ready.");
         }
         catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
         {
-            _logger.LogError(ex, "Warmup: initialization failed. The server is running but some features may be unavailable.");
+            _logger.LogError(ex, "Warmup: vector cache initialization failed. Semantic search may be unavailable.");
         }
+
+        try
+        {
+            // ONNX model loads in constructor, just verify it's available
+            _startupState.MarkOnnxReady();
+            _logger.LogInformation("Warmup: ONNX embedder available={Available}.", _embedder.IsAvailable);
+        }
+        catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "Warmup: ONNX initialization failed. Semantic search may be unavailable.");
+        }
+
+        if (_startupState.IsReady)
+            _logger.LogInformation("Warmup: all services ready.");
+        else
+            _logger.LogWarning("Warmup: completed with partial failures. Database={Database}, VectorCache={VectorCache}, Onnx={Onnx}.",
+                _startupState.DatabaseReady, _startupState.VectorCacheReady, _startupState.OnnxReady);
     }
 
 }

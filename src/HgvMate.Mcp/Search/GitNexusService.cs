@@ -133,10 +133,14 @@ public class GitNexusService
 
     private async Task<string[]> GetAvailableReposAsync()
     {
+        await Task.CompletedTask; // Satisfy async contract for future I/O operations
         var reposPath = _syncOptions.ResolveCloneRoot(_hgvMateOptions.DataPath);
         if (!Directory.Exists(reposPath))
             return [];
+        // Only return directories that contain a .git folder (active clones),
+        // filtering out stale directories left from deregistered repos.
         return Directory.GetDirectories(reposPath)
+            .Where(d => Directory.Exists(Path.Combine(d, ".git")))
             .Select(Path.GetFileName)
             .Where(n => n != null)
             .Cast<string>()

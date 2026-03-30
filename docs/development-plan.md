@@ -23,10 +23,10 @@ The ONNX model is an **encoder** (text → 384-dim vector), not an LLM. Copilot 
 | Tool naming | `hgvmate_*` prefix | Avoid collisions with other MCP servers |
 | Git credentials | Per-source PAT | Each repo source (GitHub, Azure DevOps) uses its own PAT |
 | Search layers | git grep + ONNX/sqlite-vec + GitNexus | Text, semantic, and structural — each answers different questions |
-| Persistence | Single `/data` volume with SQLite | One mount point, survives container updates, no external DB |
+| Persistence | Single `/data` volume with JSON metadata + binary vectors | One mount point, survives container updates, no external DB |
 | Structural analysis | GitNexus embedded in container (Option B) | Transparent orchestration, no separate deployment |
 | Docker base | Ubuntu 24.04 | Supports tree-sitter native build tools required by GitNexus |
-| Test framework | MSTest with in-memory SQLite | No Docker/volume needed for CI pipelines |
+| Test framework | MSTest with parallel execution at method level | Fast CI, no Docker/volume needed |
 | PR/repo | Do not submit PR until instructed | Project lives in Tex workspace temporarily; will move to own repo |
 | GitNexus scheduling | Fire-and-forget via bounded `Channel<string>` | ONNX (CPU-bound) and GitNexus (I/O-bound) overlap without contention |
 | Bulk VectorStore saves | `deferSave: true` in `IndexRepoAsync` during bulk | Avoids writing ~300 MB after every repo; single flush at end of `SyncAllAsync` |
@@ -53,7 +53,10 @@ When an incremental sync detects changed files, `HasStructuralChanges()` checks 
 
 ```
 /data/                              ← single mount point (volume or local folder)
-├── hgvmate.db                      ← SQLite: repos table, source_chunks (vec), settings
+├── repo-meta/                      ← JSON files for repo metadata (one per repo)
+│   ├── InventoryService.json
+│   └── OrdersService.json
+├── vectors.bin                     ← binary vector store for embeddings
 ├── repos/                          ← cloned repositories
 │   ├── InventoryService/
 │   │   ├── .git/
@@ -67,8 +70,8 @@ When an incremental sync detects changed files, `HasStructuralChanges()` checks 
 | Data | Location | In image or volume? |
 |------|----------|---------------------|
 | App binary + ONNX model | `/app/` | Image (replaced on update) |
-| Repo registry + settings | `/data/hgvmate.db` | Volume (persists) |
-| Vector index (source_chunks) | `/data/hgvmate.db` | Volume (persists) |
+| Repo registry | `/data/repo-meta/*.json` | Volume (persists) |
+| Vector index (embeddings) | `/data/vectors.bin` | Volume (persists) |
 | Cloned repos + GitNexus indexes | `/data/repos/` | Volume (persists) |
 | App config defaults | `appsettings.json` | Image (overridden by env vars) |
 
@@ -102,9 +105,9 @@ docker compose -f docker-compose.proxmox.yml up -d
 
 ## Implementation Phases
 
-### Phase 1: Core Infrastructure
+### Phase 1: Core Infrastructure ✅
 
-*Foundation — everything else depends on this.*
+*Foundation — everything else depends on this. **Completed.***
 
 | Step | Description |
 |------|-------------|
@@ -112,83 +115,82 @@ docker compose -f docker-compose.proxmox.yml up -d
 | 2 | **Configuration model** — `HgvMateOptions` (DataPath, Transport), `RepoSyncOptions` (PollIntervalMinutes, ClonePath), `SearchOptions`, `CredentialOptions` in `Configuration/` |
 | 3 | **Program.cs** — `HostApplicationBuilder` with MCP server, DI, hosted services. Resolve DataPath from env var → config → `./data`. Ensure directories exist. Transport selection from config |
 | 4 | **Git credential provider** — `GitCredentialProvider`: resolves credentials per repo source. For `github` repos, uses `GITHUB_TOKEN`. For `azuredevops` repos, uses `AZURE_DEVOPS_PAT`. Injects auth into git clone/pull commands |
-| 5 | **SQLite initialization** — Open/create `/data/hgvmate.db`, run schema migrations (idempotent). Tables: `repositories` |
+| 5 | **JSON-based repo registry** — Repo metadata stored as individual JSON files under `/data/repo-meta/` (migrated from SQLite for network filesystem compatibility) |
 
-### Phase 2: Repository Management
+### Phase 2: Repository Management ✅
 
-*Depends on Phase 1.*
+*Depends on Phase 1. **Completed.***
 
 | Step | Description |
 |------|-------------|
-| 6 | **`repositories` table** — Schema: id, name, url, branch, source (`github` or `azuredevops`), enabled, last_sha, last_synced, added_by. The `source` field determines which credential to use for git operations |
-| 7 | **IRepoRegistry + SqliteRepoRegistry** — `AddAsync`, `RemoveAsync`, `GetAllAsync`, `GetByNameAsync`, `UpdateLastShaAsync` |
-| 8 | **RepoSyncService** — `BackgroundService`: on startup reads registry, clones missing repos (`--depth 1 --single-branch`), pulls existing repos. Uses `GitCredentialProvider`. If `PollIntervalMinutes > 0`, starts poll timer |
+| 6 | **Repo metadata** — JSON files with id, name, url, branch, source, enabled, last_sha, last_synced, added_by, sync_state, last_error fields |
+| 7 | **IRepoRegistry + JsonRepoRegistry** — `AddAsync`, `RemoveAsync`, `GetAllAsync`, `GetByNameAsync`, `UpdateLastShaAsync` with async file I/O |
+| 8 | **RepoSyncService** — `BackgroundService`: on startup reads registry, clones missing repos (`--depth 1 --single-branch`), pulls existing repos. Uses `GitCredentialProvider`. Parallel sync with semaphore gating, retry logic for transient errors |
 | 9 | **Admin MCP tools** (class: `AdminTools`) |
-|   | — `hgvmate_add_repository(name, url, branch?, source?)`: insert into registry, trigger clone + index. `source` defaults to `github`; set to `azuredevops` for Azure DevOps repos |
+|   | — `hgvmate_add_repository(name, url, branch?, source?)`: insert into registry, trigger clone + index |
 |   | — `hgvmate_remove_repository(name)`: remove from registry, delete clone directory |
 |   | — `hgvmate_list_repositories()`: all repos with sync status, last SHA, last synced time |
 |   | — `hgvmate_reindex(repository?)`: trigger immediate sync + re-index for one or all repos |
-|   | — `hgvmate_index_status(repository?)`: per-repo status showing clone state, last SHA, and readiness per index layer (text/vector/GitNexus) as "indexing", "ready", or "error" |
+|   | — `hgvmate_index_status(repository?)`: per-repo status showing clone state, last SHA, and sync state |
 
-### Phase 3: Source Code Access (Text)
+### Phase 3: Source Code Access (Text) ✅
 
-*Depends on Phase 2. Parallel with Phases 4 & 5.*
+*Depends on Phase 2. **Completed.***
 
 | Step | Description |
 |------|-------------|
-| 10 | **SourceCodeReader** — reads from `/data/repos/{name}`. Methods: `GetFileAsync`, `ListDirectoryAsync`. Path traversal protection |
+| 10 | **SourceCodeReader** — reads from cloned repos. Methods: `GetFileAsync`, `ListDirectoryAsync`. Path traversal protection + file size limits |
 | 11 | **GitGrepSearchService** — shells out to `git grep -rli` across enabled repos. Supports optional repo filter. Returns file paths + matching lines |
 | 12 | **Source MCP tools** (class: `SourceCodeTools`) |
-|    | — `hgvmate_search_source_code(query, repository?)`: text search initially, upgraded to hybrid in Phase 5 |
+|    | — `hgvmate_search_source_code(query, repository?)`: hybrid search (text + semantic) |
 |    | — `hgvmate_get_file_content(repository, path)`: read file from cloned repo |
 
-### Phase 4: GitNexus Integration (Structural)
+### Phase 4: GitNexus Integration (Structural) ✅
 
-*Depends on Phase 2. Parallel with Phases 3 & 5.*
+*Depends on Phase 2. **Completed.***
 
 | Step | Description |
 |------|-------------|
-| 13 | **Node.js + GitNexus in Docker** — Install Node.js + `gitnexus@latest` in Dockerfile. For local dev, require Node.js on PATH |
-| 14 | **GitNexusService** — `AnalyzeAsync(repoName)` runs `npx gitnexus analyze --cwd /data/repos/{name}`. Called by `RepoSyncService` after clone/pull and by `hgvmate_reindex` |
-| 15 | **GitNexus MCP client** — HgvMate acts as MCP client to GitNexus MCP server (spawned via `npx gitnexus mcp`). Routes structural queries through it |
-| 16 | **Structural MCP tools** (class: `StructuralTools`) |
-|    | — `hgvmate_find_symbol(name, repository?)`: 360-degree symbol view (class/method + callers + callees + hierarchy) |
+| 13 | **Node.js + GitNexus in Docker** — Node.js 22 + `gitnexus` installed globally in Dockerfile |
+| 14 | **GitNexusService** — `AnalyzeAsync(repoName)` runs `gitnexus analyze`. Enqueued via bounded `Channel<string>` for concurrent background analysis |
+| 15 | **Structural MCP tools** (class: `StructuralTools`) |
+|    | — `hgvmate_find_symbol(name, repository?)`: 360-degree symbol view |
 |    | — `hgvmate_get_references(name, repository?)`: what calls/uses this symbol |
 |    | — `hgvmate_get_call_chain(name, repository?)`: execution flow trace |
-|    | — `hgvmate_get_impact(name, repository?)`: blast radius with depth/confidence |
+|    | — `hgvmate_get_impact(name, repository?)`: blast radius |
 
-### Phase 5: Vector Search (Semantic)
+### Phase 5: Vector Search (Semantic) ✅
 
-*Depends on Phase 2. Parallel with Phases 3 & 4.*
-
-| Step | Description |
-|------|-------------|
-| 17 | **OnnxEmbedder** — wraps `Microsoft.ML.OnnxRuntime` with all-MiniLM-L6-v2 (80 MB, 384-dim, CPU). Model baked into image at `/app/models/` |
-| 18 | **VectorStore** — manages `source_chunks` virtual table in `/data/hgvmate.db`. Methods: `UpsertChunksAsync`, `DeleteChunksForFileAsync`, `SearchAsync(queryVector, limit)` |
-| 19 | **IndexingService** — chunks source files (~800 tokens, overlap), embeds via ONNX, upserts into sqlite-vec. Called by `RepoSyncService` after clone/pull |
-| 20 | **HybridSearchService** — runs vector search + git grep in parallel, merges/deduplicates, ranks. Upgrades `hgvmate_search_source_code` to hybrid results |
-
-### Phase 6: Change Monitoring
-
-*Depends on Phases 2–5 (all indexing pipelines must exist).*
+*Depends on Phase 2. **Completed.***
 
 | Step | Description |
 |------|-------------|
-| 21 | **Poll loop** — In `RepoSyncService`: periodic `git fetch` per repo, compare remote HEAD vs stored `last_sha`. If different: `git pull --ff-only`, diff changed files, re-index only changed files (vector: delete old chunks + embed new; GitNexus: incremental), update `last_sha` in registry |
+| 17 | **OnnxEmbedder** — wraps `Microsoft.ML.OnnxRuntime` with all-MiniLM-L6-v2 (384-dim). Auto-selects quantized INT8 models per architecture. CUDA/OpenVINO/CPU provider auto-detection |
+| 18 | **VectorStore** — binary-file-backed cache (`vectors.bin`) with SIMD-accelerated cosine similarity via `TensorPrimitives`. Atomic re-index (index-then-swap) prevents data gaps |
+| 19 | **IndexingService** — chunks source files (~800 tokens, overlap), embeds via ONNX, upserts into binary store. Batch ONNX inference for efficiency. File size limits prevent OOM |
+| 20 | **HybridSearchService** — runs vector search + git grep in parallel, merges/deduplicates, ranks |
+
+### Phase 6: Change Monitoring ✅
+
+*Depends on Phases 2–5. **Completed.***
+
+| Step | Description |
+|------|-------------|
+| 21 | **Poll loop** — `RepoSyncService`: periodic `git fetch` per repo, compare remote HEAD vs stored `last_sha`. Incremental re-index for changed files only. GitNexus re-analysis only for structural file changes |
 | 22 | **On-demand reindex** — `hgvmate_reindex` triggers immediate sync + full re-index |
 
-### Phase 7: Packaging & Testing
+### Phase 7: Packaging & Testing ✅
 
-*Depends on all above.*
+*Depends on all above. **Completed.***
 
 | Step | Description |
 |------|-------------|
-| 23 | **Dockerfile** — Multi-stage: .NET SDK build → Alpine runtime (`mcr.microsoft.com/dotnet/runtime-deps:10.0-alpine`) + Node.js (Alpine) + git + ONNX model. Self-contained publish. Volume at `/data` |
-| 24 | **appsettings.json** — Default config: DataPath `./data`, Transport `stdio`, PollIntervalMinutes `15` |
-| 25 | **appsettings.Development.json** — Override: PollIntervalMinutes `0` |
-| 26 | **`.vscode/mcp.json` examples** — stdio (dotnet run), stdio (docker), SSE (remote) |
-| 27 | **MSTest unit tests** — SqliteRepoRegistry (in-memory SQLite), GitGrepSearchService (mock), HybridSearchService (mock), AdminTools, SourceCodeTools, OnnxEmbedder |
-| 28 | **Integration test** — End-to-end: add repo → wait for index → search → verify results |
+| 23 | **Dockerfile** — Multi-stage: .NET SDK build → Ubuntu 24.04 runtime + Node.js 22 + git + ONNX models. Self-contained publish. OpenVINO support for x86_64, standard ORT for ARM64 |
+| 24 | **REST API** — Full REST API with health endpoint, search, repository management, structural analysis, rate limiting |
+| 25 | **Docker Compose** — Standard dev compose + Proxmox deployment with Aspire Dashboard, healthchecks |
+| 26 | **Telemetry** — OpenTelemetry integration with HVO.Enterprise.Telemetry, custom metrics and activities |
+| 27 | **MSTest unit tests** — JsonRepoRegistry, VectorStore, IndexingService, AdminTools, SourceCodeTools, OnnxEmbedder, configuration, credential provider |
+| 28 | **Integration + Docker tests** — SSE transport, REST API, Docker container validation |
 
 ## Dependency Map
 
