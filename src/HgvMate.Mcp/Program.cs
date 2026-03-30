@@ -168,8 +168,6 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
         ?? Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
     if (!string.IsNullOrEmpty(otlpEndpoint))
     {
-        Console.Error.WriteLine($"[OTLP] Enabling OpenTelemetry export for service '{serviceName}'.");
-
         services.AddOpenTelemetryExport(options =>
         {
             options.ServiceName = serviceName;
@@ -192,10 +190,6 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
                 builder.AddRuntimeInstrumentation();
             };
         });
-    }
-    else
-    {
-        Console.Error.WriteLine("[OTLP] No OTLP endpoint configured — skipping OpenTelemetry export.");
     }
 
     services.AddTelemetryStatistics();
