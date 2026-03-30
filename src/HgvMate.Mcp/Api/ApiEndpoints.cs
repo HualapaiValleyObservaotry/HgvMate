@@ -493,20 +493,23 @@ public static class ApiEndpoints
     {
         var usage = api.MapGroup("/diagnostics/usage").WithTags("Diagnostics");
 
-        usage.MapGet("/", async (ToolUsageLogger usageLogger, string? from, string? to) =>
+        usage.MapGet("/", async (ToolUsageLogger usageLogger, StartupState startupState, string? from, string? to) =>
         {
+            if (!startupState.IsReady)
+                return Results.Json(new { status = "starting" }, statusCode: 503);
+
             DateTime? fromDate = null, toDate = null;
             if (!string.IsNullOrWhiteSpace(from))
             {
-                if (!DateTime.TryParse(from, out var fd))
+                if (!DateTimeOffset.TryParse(from, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var fd))
                     return Results.Problem(detail: "'from' must be a valid ISO 8601 date.", statusCode: StatusCodes.Status400BadRequest);
-                fromDate = fd;
+                fromDate = fd.UtcDateTime;
             }
             if (!string.IsNullOrWhiteSpace(to))
             {
-                if (!DateTime.TryParse(to, out var td))
+                if (!DateTimeOffset.TryParse(to, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var td))
                     return Results.Problem(detail: "'to' must be a valid ISO 8601 date.", statusCode: StatusCodes.Status400BadRequest);
-                toDate = td;
+                toDate = td.UtcDateTime;
             }
 
             var summaries = await usageLogger.GetToolSummariesAsync(fromDate, toDate);
@@ -533,20 +536,23 @@ public static class ApiEndpoints
         })
         .WithSummary("Tool usage summary — call counts, durations, and error rates");
 
-        usage.MapGet("/patterns", async (ToolUsageLogger usageLogger, string? from, string? to) =>
+        usage.MapGet("/patterns", async (ToolUsageLogger usageLogger, StartupState startupState, string? from, string? to) =>
         {
+            if (!startupState.IsReady)
+                return Results.Json(new { status = "starting" }, statusCode: 503);
+
             DateTime? fromDate = null, toDate = null;
             if (!string.IsNullOrWhiteSpace(from))
             {
-                if (!DateTime.TryParse(from, out var fd))
+                if (!DateTimeOffset.TryParse(from, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var fd))
                     return Results.Problem(detail: "'from' must be a valid ISO 8601 date.", statusCode: StatusCodes.Status400BadRequest);
-                fromDate = fd;
+                fromDate = fd.UtcDateTime;
             }
             if (!string.IsNullOrWhiteSpace(to))
             {
-                if (!DateTime.TryParse(to, out var td))
+                if (!DateTimeOffset.TryParse(to, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var td))
                     return Results.Problem(detail: "'to' must be a valid ISO 8601 date.", statusCode: StatusCodes.Status400BadRequest);
-                toDate = td;
+                toDate = td.UtcDateTime;
             }
 
             var repeatedSearches = await usageLogger.GetRepeatedSearchesAsync(fromDate, toDate);

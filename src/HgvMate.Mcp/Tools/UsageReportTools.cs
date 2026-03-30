@@ -26,15 +26,19 @@ public class UsageReportTools
         HgvMateDiagnostics.RecordToolCall("usage_report");
 
         DateTime? fromDate = null, toDate = null;
-        if (!string.IsNullOrWhiteSpace(from) && !DateTime.TryParse(from, out var fd))
-            return "Error: 'from' must be a valid ISO 8601 date.";
-        else if (!string.IsNullOrWhiteSpace(from))
-            fromDate = DateTime.Parse(from);
+        if (!string.IsNullOrWhiteSpace(from))
+        {
+            if (!DateTimeOffset.TryParse(from, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var fd))
+                return "Error: 'from' must be a valid ISO 8601 date.";
+            fromDate = fd.UtcDateTime;
+        }
 
-        if (!string.IsNullOrWhiteSpace(to) && !DateTime.TryParse(to, out var td))
-            return "Error: 'to' must be a valid ISO 8601 date.";
-        else if (!string.IsNullOrWhiteSpace(to))
-            toDate = DateTime.Parse(to);
+        if (!string.IsNullOrWhiteSpace(to))
+        {
+            if (!DateTimeOffset.TryParse(to, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var td))
+                return "Error: 'to' must be a valid ISO 8601 date.";
+            toDate = td.UtcDateTime;
+        }
 
         var validReports = new[] { "summary", "repeated_searches", "sequences", "errors", "all" };
         if (!validReports.Contains(report, StringComparer.OrdinalIgnoreCase))

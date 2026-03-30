@@ -5,7 +5,8 @@ namespace HgvMate.Tests.Helpers;
 
 /// <summary>
 /// Creates a <see cref="ToolUsageLogger"/> backed by a temp directory. The logger is
-/// initialized but does NOT start a background consumer, keeping tests deterministic.
+/// constructed but NOT initialized — call <see cref="ToolUsageLogger.InitializeAsync"/> to
+/// create the schema and start the background consumer.
 /// </summary>
 internal static class TestToolUsageLogger
 {

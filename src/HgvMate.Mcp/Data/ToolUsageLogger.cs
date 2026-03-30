@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Data.Sqlite;
@@ -15,6 +16,7 @@ public sealed class ToolUsageLogger : IDisposable
     private readonly ILogger<ToolUsageLogger> _logger;
     private readonly Channel<ToolUsageEntry> _channel;
     private readonly CancellationTokenSource _cts = new();
+    private readonly ConcurrentQueue<TaskCompletionSource> _flushRequests = new();
     private Task? _consumerTask;
 
     /// <summary>Number of days to retain usage records (auto-pruned on startup).</summary>
@@ -55,6 +57,7 @@ public sealed class ToolUsageLogger : IDisposable
     {
         var entry = new ToolUsageEntry
         {
+            Timestamp = DateTime.UtcNow,
             ToolName = toolName,
             Parameters = parameters is not null ? JsonSerializer.Serialize(parameters) : "{}",
             DurationMs = durationMs,
@@ -228,7 +231,7 @@ public sealed class ToolUsageLogger : IDisposable
         cmd.CommandText = """
             CREATE TABLE IF NOT EXISTS tool_usage (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
                 tool_name TEXT NOT NULL,
                 parameters TEXT NOT NULL,
                 duration_ms REAL NOT NULL,
@@ -257,60 +260,97 @@ public sealed class ToolUsageLogger : IDisposable
 
     private async Task ConsumeAsync(CancellationToken cancellationToken)
     {
+        await using var connection = OpenConnection();
         try
         {
-            await foreach (var entry in _channel.Reader.ReadAllAsync(cancellationToken))
+            while (await _channel.Reader.WaitToReadAsync(cancellationToken))
             {
-                try
+                var batch = new List<ToolUsageEntry>();
+                while (_channel.Reader.TryRead(out var entry))
+                    batch.Add(entry);
+
+                if (batch.Count > 0)
                 {
-                    await WriteEntryAsync(entry);
+                    try
+                    {
+                        await WriteBatchAsync(connection, batch);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "ToolUsageLogger: failed to persist {Count} entries.", batch.Count);
+                    }
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "ToolUsageLogger: failed to persist entry for tool '{Tool}'.", entry.ToolName);
-                }
+
+                CompletePendingFlushes();
             }
         }
         catch (OperationCanceledException) { /* shutdown */ }
+
+        CompletePendingFlushes();
     }
 
-    private async Task WriteEntryAsync(ToolUsageEntry entry)
+    private static async Task WriteBatchAsync(SqliteConnection connection, List<ToolUsageEntry> entries)
     {
-        await using var connection = OpenConnection();
+        await using var transaction = await connection.BeginTransactionAsync();
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO tool_usage (tool_name, parameters, duration_ms, result_count, session_id, caller_id, error)
-            VALUES (@toolName, @parameters, @durationMs, @resultCount, @sessionId, @callerId, @error)
+            INSERT INTO tool_usage (timestamp, tool_name, parameters, duration_ms, result_count, session_id, caller_id, error)
+            VALUES (@timestamp, @toolName, @parameters, @durationMs, @resultCount, @sessionId, @callerId, @error)
             """;
-        cmd.Parameters.AddWithValue("@toolName", entry.ToolName);
-        cmd.Parameters.AddWithValue("@parameters", entry.Parameters);
-        cmd.Parameters.AddWithValue("@durationMs", entry.DurationMs);
-        cmd.Parameters.AddWithValue("@resultCount", (object?)entry.ResultCount ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@sessionId", (object?)entry.SessionId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@callerId", (object?)entry.CallerId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@error", (object?)entry.Error ?? DBNull.Value);
-        await cmd.ExecuteNonQueryAsync();
+        var pTimestamp = cmd.Parameters.Add("@timestamp", SqliteType.Text);
+        var pToolName = cmd.Parameters.Add("@toolName", SqliteType.Text);
+        var pParameters = cmd.Parameters.Add("@parameters", SqliteType.Text);
+        var pDurationMs = cmd.Parameters.Add("@durationMs", SqliteType.Real);
+        var pResultCount = cmd.Parameters.Add("@resultCount", SqliteType.Integer);
+        var pSessionId = cmd.Parameters.Add("@sessionId", SqliteType.Text);
+        var pCallerId = cmd.Parameters.Add("@callerId", SqliteType.Text);
+        var pError = cmd.Parameters.Add("@error", SqliteType.Text);
+
+        foreach (var entry in entries)
+        {
+            pTimestamp.Value = entry.Timestamp.ToString("o");
+            pToolName.Value = entry.ToolName;
+            pParameters.Value = entry.Parameters;
+            pDurationMs.Value = entry.DurationMs;
+            pResultCount.Value = (object?)entry.ResultCount ?? DBNull.Value;
+            pSessionId.Value = (object?)entry.SessionId ?? DBNull.Value;
+            pCallerId.Value = (object?)entry.CallerId ?? DBNull.Value;
+            pError.Value = (object?)entry.Error ?? DBNull.Value;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        await transaction.CommitAsync();
     }
 
     /// <summary>
-    /// Completes the channel and waits for the consumer to finish writing all pending entries.
+    /// Waits for all currently queued entries to be persisted without stopping the logger.
     /// </summary>
-    public async Task FlushAsync()
+    public Task FlushAsync()
     {
-        _channel.Writer.TryComplete();
-        if (_consumerTask is not null)
-            await _consumerTask;
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _flushRequests.Enqueue(tcs);
+        return tcs.Task;
+    }
+
+    private void CompletePendingFlushes()
+    {
+        while (_flushRequests.TryDequeue(out var tcs))
+            tcs.TrySetResult();
     }
 
     public void Dispose()
     {
-        try { _cts.Cancel(); }
-        catch (ObjectDisposedException) { /* already disposed */ }
-        _channel.Writer.TryComplete();
-        try { _consumerTask?.GetAwaiter().GetResult(); }
-        catch (OperationCanceledException) { /* expected */ }
-        catch (ObjectDisposedException) { /* expected */ }
-        _cts.Dispose();
+        try
+        {
+            _channel.Writer.TryComplete();
+            _consumerTask?.GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException) { /* expected if the consumer was cancelled externally */ }
+        catch (ObjectDisposedException) { /* expected if disposal is racing with shutdown */ }
+        finally
+        {
+            _cts.Dispose();
+        }
     }
 }
 
@@ -318,6 +358,7 @@ public sealed class ToolUsageLogger : IDisposable
 
 internal sealed class ToolUsageEntry
 {
+    public required DateTime Timestamp { get; init; }
     public required string ToolName { get; init; }
     public required string Parameters { get; init; }
     public required double DurationMs { get; init; }
