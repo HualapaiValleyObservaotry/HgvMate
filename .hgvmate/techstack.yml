@@ -1,0 +1,92 @@
+name: HgvMate
+description: MCP server for AI-assisted code intelligence across Azure DevOps and GitHub repositories
+version: "1.3.0"
+
+languages:
+  - name: C#
+    version: "14"
+    primary: true
+  - name: JavaScript
+    version: ES2022
+    note: GitNexus tree-sitter service
+
+runtime:
+  - name: .NET
+    version: "10.0"
+  - name: Node.js
+    version: "22"
+    note: GitNexus structural analysis
+
+frameworks:
+  - name: ASP.NET Core
+    version: "10.0"
+    purpose: HTTP/REST API, middleware pipeline
+  - name: ModelContextProtocol SDK
+    version: 0.3.0-preview.1
+    purpose: MCP server (stdio + SSE/HTTP transport)
+
+ai:
+  - name: ONNX Runtime
+    version: "1.24.x"
+    purpose: Local embedding inference
+  - name: all-MiniLM-L6-v2
+    purpose: 384-dimensional text embeddings
+  - name: GitNexus (tree-sitter)
+    version: "1.4.10"
+    purpose: AST parsing, call chains, symbol references
+
+storage:
+  - name: SQLite
+    purpose: Tool usage logging
+    package: Microsoft.Data.Sqlite 10.0.5
+  - name: Custom binary vectors
+    purpose: SIMD-accelerated cosine similarity via TensorPrimitives
+  - name: JSON file-per-repo
+    purpose: Repository metadata
+
+infrastructure:
+  - name: Docker
+    base: Ubuntu 24.04
+    purpose: Multi-stage build, multi-arch (amd64 + arm64)
+  - name: GitHub Container Registry
+    purpose: Image hosting
+  - name: GitHub Actions
+    purpose: CI/CD — Docker build + publish
+  - name: Tailscale
+    purpose: Secure remote access
+
+observability:
+  - name: OpenTelemetry
+    purpose: Distributed tracing, metrics, logging
+  - name: .NET Aspire Dashboard
+    purpose: OTLP trace/metric visualization
+  - name: Scalar
+    version: "2.13.14"
+    purpose: Interactive API reference UI
+
+testing:
+  framework: MSTest 4.x
+  categories:
+    - Unit
+    - Docker
+    - Integration
+    - LiveOnnx
+  parallel: method-level
+
+packages:
+  - name: ModelContextProtocol
+    version: 0.3.0-preview.1
+  - name: ModelContextProtocol.AspNetCore
+    version: 0.3.0-preview.1
+  - name: Microsoft.ML.OnnxRuntime
+    version: "1.24.4"
+  - name: Microsoft.Data.Sqlite
+    version: "10.0.5"
+  - name: HVO.Enterprise.Telemetry
+    version: "1.0.3"
+  - name: HVO.Enterprise.Telemetry.OpenTelemetry
+    version: "1.1.2"
+  - name: Scalar.AspNetCore
+    version: "2.13.14"
+  - name: OpenTelemetry.Instrumentation.AspNetCore
+    version: "1.15.1"

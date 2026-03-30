@@ -10,7 +10,7 @@ HgvMate is an MCP (Model Context Protocol) server that gives VS Code Copilot Cha
 2. **Semantic** — ONNX embeddings (all-MiniLM-L6-v2) + sqlite-vec for "find code that does X" queries
 3. **Structural** — GitNexus (tree-sitter AST parsing + graph DB) for call chains, blast radius, and symbol references
 
-All 11 MCP tools are prefixed `hgvmate_*`. Supports both stdio and SSE transports. Runs locally via `dotnet run`, in a Docker container, or on Proxmox. GitNexus is embedded in the container and orchestrated transparently — users see only HgvMate tools.
+All 14 MCP tools are prefixed `hgvmate_*`. Supports both stdio and SSE transports. Runs locally via `dotnet run`, in a Docker container, or on Proxmox. GitNexus is embedded in the container and orchestrated transparently — users see only HgvMate tools.
 
 The ONNX model is an **encoder** (text → 384-dim vector), not an LLM. Copilot (remote) provides all reasoning. GitNexus is fully deterministic — no AI/ML.
 
@@ -192,6 +192,18 @@ docker compose -f docker-compose.proxmox.yml up -d
 | 27 | **MSTest unit tests** — JsonRepoRegistry, VectorStore, IndexingService, AdminTools, SourceCodeTools, OnnxEmbedder, configuration, credential provider |
 | 28 | **Integration + Docker tests** — SSE transport, REST API, Docker container validation |
 
+### Phase 8: Observability & Diagnostics ✅
+
+*Depends on Phase 7. **Completed.***
+
+| Step | Description |
+|------|-------------|
+| 29 | **Tool usage logging** — SQLite-backed append-only log with `Channel<T>` async writes. Captures tool name, parameters, duration, result count, session/caller ID, errors. 90-day auto-prune |
+| 30 | **Usage analytics MCP tool** — `hgvmate_usage_report`: canned queries for tool summaries, repeated cross-repo searches, tool sequences, error rates. REST endpoints at `/api/diagnostics/usage` |
+| 31 | **Server version info** — `BuildInfo` reads assembly metadata (version, git SHA, build date) baked at build time. `hgvmate_server_info` MCP tool and `GET /api/server-info` REST endpoint. Version fields added to `/health` |
+| 32 | **Diagnostics routing fix** — `/diagnostics` endpoint now available at both `/diagnostics` and `/api/diagnostics` for consistency |
+| 33 | **CI build metadata** — Docker build passes `GIT_SHA` and `BUILD_DATE` to `dotnet publish` via MSBuild properties. Local dev builds show sensible fallbacks |
+
 ## Dependency Map
 
 ```
@@ -212,17 +224,20 @@ Phase 3          Phase 4         Phase 5
                     │
                     ▼
               Phase 7 (Packaging & Testing)
+                    │
+                    ▼
+              Phase 8 (Observability & Diagnostics)
 ```
 
 Phases 3, 4, 5 are independent — they all just need repos cloned (Phase 2).
 
-## MCP Tools Summary (11 tools)
+## MCP Tools Summary (14 tools)
 
 | Tool | Phase | Backend | Description |
 |------|-------|---------|-------------|
-| `hgvmate_add_repository` | 2 | SqliteRepoRegistry | Add a repo to be indexed (source: github or azuredevops) |
-| `hgvmate_remove_repository` | 2 | SqliteRepoRegistry | Remove a repo and its data |
-| `hgvmate_list_repositories` | 2 | SqliteRepoRegistry | List repos with sync status |
+| `hgvmate_add_repository` | 2 | JsonRepoRegistry | Add a repo to be indexed (source: github or azuredevops) |
+| `hgvmate_remove_repository` | 2 | JsonRepoRegistry | Remove a repo and its data |
+| `hgvmate_list_repositories` | 2 | JsonRepoRegistry | List repos with sync status |
 | `hgvmate_reindex` | 2+6 | RepoSyncService | Force sync + re-index |
 | `hgvmate_index_status` | 2 | RepoSyncService | Per-repo index status: clone/text/vector/GitNexus readiness |
 | `hgvmate_search_source_code` | 3→5 | HybridSearchService | Text + semantic search (text only until Phase 5) |
@@ -231,6 +246,9 @@ Phases 3, 4, 5 are independent — they all just need repos cloned (Phase 2).
 | `hgvmate_get_references` | 4 | GitNexus (context) | What calls/uses this symbol |
 | `hgvmate_get_call_chain` | 4 | GitNexus (query) | Execution flow trace |
 | `hgvmate_get_impact` | 4 | GitNexus (impact) | Blast radius with depth/confidence |
+| `hgvmate_server_info` | 8 | BuildInfo + Registry | Server version, capabilities, and endpoint info |
+| `hgvmate_usage_report` | 8 | ToolUsageLogger | Tool usage analytics — call counts, patterns, error rates |
+| `hgvmate_get_repo_tree` | 8 | GitNexus (analyze) | Repository file tree |
 
 ## Project Structure
 
@@ -252,11 +270,16 @@ HgvMate/
 │   │   ├── RepoSyncOptions.cs
 │   │   ├── SearchOptions.cs
 │   │   ├── CredentialOptions.cs
+│   │   ├── BuildInfo.cs
 │   │   └── RepoSource.cs              ← enum: GitHub, AzureDevOps
 │   ├── Tools/
 │   │   ├── AdminTools.cs
 │   │   ├── SourceCodeTools.cs
-│   │   └── StructuralTools.cs
+│   │   ├── StructuralTools.cs
+│   │   ├── ServerInfoTools.cs
+│   │   └── UsageReportTools.cs
+│   ├── Data/
+│   │   └── ToolUsageLogger.cs
 │   ├── Repos/
 │   │   ├── IRepoRegistry.cs
 │   │   ├── JsonRepoRegistry.cs
