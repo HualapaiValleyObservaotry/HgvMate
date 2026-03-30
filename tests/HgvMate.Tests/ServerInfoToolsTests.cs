@@ -1,4 +1,5 @@
 using HgvMate.Mcp.Configuration;
+using HgvMate.Mcp.Data;
 using HgvMate.Mcp.Repos;
 using HgvMate.Mcp.Search;
 using HgvMate.Mcp.Tools;
@@ -9,20 +10,32 @@ namespace HgvMate.Tests;
 [TestClass]
 public sealed class ServerInfoToolsTests
 {
+    private string _tempDir = null!;
     private FakeRepoRegistry _registry = null!;
     private IOnnxEmbedder _embedder = null!;
     private HgvMateOptions _options = null!;
+    private ToolUsageLogger _usageLogger = null!;
     private ServerInfoTools _tools = null!;
 
     [TestInitialize]
     public void Setup()
     {
+        _tempDir = Path.Combine(Path.GetTempPath(), $"serverinfo-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_tempDir);
         _registry = new FakeRepoRegistry();
         _embedder = new OnnxEmbedder(
             (Microsoft.ML.OnnxRuntime.InferenceSession?)null,
             NullLogger<OnnxEmbedder>.Instance);
         _options = new HgvMateOptions { Transport = "sse" };
-        _tools = new ServerInfoTools(_registry, _embedder, _options);
+        _usageLogger = new ToolUsageLogger(_tempDir, NullLogger<ToolUsageLogger>.Instance);
+        _tools = new ServerInfoTools(_registry, _embedder, _options, _usageLogger);
+    }
+
+    [TestCleanup]
+    public void Cleanup()
+    {
+        _usageLogger.Dispose();
+        try { Directory.Delete(_tempDir, recursive: true); } catch { }
     }
 
     [TestMethod]

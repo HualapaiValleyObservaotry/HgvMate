@@ -4,7 +4,7 @@ An MCP (Model Context Protocol) server that provides AI agents with source code 
 
 ## Features
 
-- **11 MCP tools** prefixed `hgvmate_*` — repository management, search, file access, structural analysis, server info, usage analytics
+- **14 MCP tools** prefixed `hgvmate_*` — repository management, search, file access, structural analysis, server info, usage analytics
 - **Dual transport** — stdio (local dev) and SSE/HTTP (remote/container deployment)
 - **Triple-indexed search** — git grep (text), ONNX embeddings (semantic), GitNexus (structural)
 - **REST API** with OpenAPI/Scalar documentation alongside MCP

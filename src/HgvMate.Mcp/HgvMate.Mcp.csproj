@@ -5,7 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- Version info — overridden by CI via -p:Version= and -p:InformationalVersion= -->
+    <!-- Version info — bump here for each release; CI uses this value as-is -->
     <Version>1.3.0</Version>
     <!-- ONNX execution provider: cpu (default), cuda, directml, openvino -->
     <OnnxProvider Condition="'$(OnnxProvider)' == ''">cpu</OnnxProvider>
