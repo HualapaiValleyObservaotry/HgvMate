@@ -9,7 +9,7 @@ namespace HgvMate.Mcp.Repos;
 /// File-backed repository registry. Each repo is a JSON file: {dataPath}/repo-meta/{name}.json.
 /// Thread-safe via a <see cref="SemaphoreSlim"/> for writes and concurrent reads from disk.
 /// </summary>
-public sealed class JsonRepoRegistry : IRepoRegistry
+public sealed class JsonRepoRegistry : IRepoRegistry, IDisposable
 {
     private readonly string _metaDir;
     private readonly ILogger<JsonRepoRegistry> _logger;
@@ -28,8 +28,8 @@ public sealed class JsonRepoRegistry : IRepoRegistry
         Directory.CreateDirectory(_metaDir);
         _logger = logger;
 
-        // Seed the next ID from the highest existing ID
-        _nextId = LoadAllSync().Select(r => r.Id).DefaultIfEmpty(0).Max();
+        // Seed the next ID from the highest existing ID (sync is acceptable in constructor)
+        _nextId = LoadAllForInit().Select(r => r.Id).DefaultIfEmpty(0).Max();
     }
 
     public async Task<RepoRecord> AddAsync(string name, string url, string branch, string source, string? addedBy = null)
@@ -46,7 +46,7 @@ public sealed class JsonRepoRegistry : IRepoRegistry
 
             var id = Interlocked.Increment(ref _nextId);
             var record = new RepoRecord(id, name, url, branch, source, true, null, null, addedBy);
-            WriteRecord(path, record);
+            await WriteRecordAsync(path, record);
             _logger.LogInformation("Added repository {Name} (id={Id}).", name, id);
             return record;
         }
@@ -76,27 +76,26 @@ public sealed class JsonRepoRegistry : IRepoRegistry
         return true;
     }
 
-    public Task<IReadOnlyList<RepoRecord>> GetAllAsync()
+    public async Task<IReadOnlyList<RepoRecord>> GetAllAsync()
     {
-        var records = LoadAllSync().OrderBy(r => r.Name).ToList();
-        return Task.FromResult<IReadOnlyList<RepoRecord>>(records);
+        var records = (await LoadAllAsync()).OrderBy(r => r.Name).ToList();
+        return records;
     }
 
-    public Task<RepoRecord?> GetByNameAsync(string name)
+    public async Task<RepoRecord?> GetByNameAsync(string name)
     {
         var path = GetFilePath(name);
         if (!File.Exists(path))
-            return Task.FromResult<RepoRecord?>(null);
+            return null;
 
-        var record = LoadRecord(path);
-        return Task.FromResult<RepoRecord?>(record);
+        return await LoadRecordAsync(path);
     }
 
-    public Task<RepoRecord?> GetByUrlAsync(string url)
+    public async Task<RepoRecord?> GetByUrlAsync(string url)
     {
         var normalized = NormalizeUrl(url);
-        var match = LoadAllSync().FirstOrDefault(r => NormalizeUrl(r.Url) == normalized);
-        return Task.FromResult(match);
+        var all = await LoadAllAsync();
+        return all.FirstOrDefault(r => NormalizeUrl(r.Url) == normalized);
     }
 
     public Task<bool> UpdateLastShaAsync(string name, string sha) =>
@@ -173,10 +172,10 @@ public sealed class JsonRepoRegistry : IRepoRegistry
         await _writeLock.WaitAsync();
         try
         {
-            var record = LoadRecord(path);
+            var record = await LoadRecordAsync(path);
             if (record is null) return false;
             var updated = mutate(record);
-            WriteRecord(path, updated);
+            await WriteRecordAsync(path, updated);
             return true;
         }
         finally
@@ -185,19 +184,19 @@ public sealed class JsonRepoRegistry : IRepoRegistry
         }
     }
 
-    private static void WriteRecord(string path, RepoRecord record)
+    private static async Task WriteRecordAsync(string path, RepoRecord record)
     {
         var json = JsonSerializer.Serialize(record, JsonOptions);
         var tempPath = path + ".tmp";
-        File.WriteAllText(tempPath, json);
+        await File.WriteAllTextAsync(tempPath, json);
         File.Move(tempPath, path, overwrite: true);
     }
 
-    private RepoRecord? LoadRecord(string path)
+    private async Task<RepoRecord?> LoadRecordAsync(string path)
     {
         try
         {
-            var json = File.ReadAllText(path);
+            var json = await File.ReadAllTextAsync(path);
             return JsonSerializer.Deserialize<RepoRecord>(json, JsonOptions);
         }
         catch (Exception ex)
@@ -207,7 +206,7 @@ public sealed class JsonRepoRegistry : IRepoRegistry
         }
     }
 
-    private List<RepoRecord> LoadAllSync()
+    private async Task<List<RepoRecord>> LoadAllAsync()
     {
         if (!Directory.Exists(_metaDir))
             return [];
@@ -215,10 +214,36 @@ public sealed class JsonRepoRegistry : IRepoRegistry
         var results = new List<RepoRecord>();
         foreach (var file in Directory.EnumerateFiles(_metaDir, "*.json"))
         {
-            var record = LoadRecord(file);
+            var record = await LoadRecordAsync(file);
             if (record is not null)
                 results.Add(record);
         }
         return results;
     }
+
+    /// <summary>Synchronous load used only during constructor initialization.</summary>
+    private List<RepoRecord> LoadAllForInit()
+    {
+        if (!Directory.Exists(_metaDir))
+            return [];
+
+        var results = new List<RepoRecord>();
+        foreach (var file in Directory.EnumerateFiles(_metaDir, "*.json"))
+        {
+            try
+            {
+                var json = File.ReadAllText(file);
+                var record = JsonSerializer.Deserialize<RepoRecord>(json, JsonOptions);
+                if (record is not null)
+                    results.Add(record);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load repo record from '{Path}'. Skipping file.", file);
+            }
+        }
+        return results;
+    }
+
+    public void Dispose() => _writeLock.Dispose();
 }

@@ -18,7 +18,7 @@ public sealed class AdminToolsTests
     {
         _registry = new FakeRepoRegistry();
         _syncService = new FakeRepoSyncService(_registry);
-        _tools = new AdminTools(_registry, _syncService);
+        _tools = new AdminTools(_registry, _syncService, NullLogger<AdminTools>.Instance);
     }
 
     [TestMethod]

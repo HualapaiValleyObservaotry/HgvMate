@@ -1,27 +1,35 @@
+using System.Collections.Concurrent;
 using HgvMate.Mcp.Repos;
 
 namespace HgvMate.Tests;
 
 internal class FakeRepoRegistry : IRepoRegistry
 {
-    private readonly List<RepoRecord> _repos = new();
+    private readonly ConcurrentBag<RepoRecord> _repos = new();
+    private int _nextId;
 
     public Task<RepoRecord> AddAsync(string name, string url, string branch, string source, string? addedBy = null)
     {
-        var record = new RepoRecord(
-            _repos.Count + 1, name, url, branch, source, true, null, null, addedBy);
+        var id = Interlocked.Increment(ref _nextId);
+        var record = new RepoRecord(id, name, url, branch, source, true, null, null, addedBy);
         _repos.Add(record);
         return Task.FromResult(record);
     }
 
     public Task<bool> RemoveAsync(string name)
     {
-        _repos.RemoveAll(r => r.Name == name);
+        // ConcurrentBag doesn't support removal, so rebuild
+        var snapshot = _repos.ToArray();
+        while (_repos.TryTake(out _)) { }
+        foreach (var r in snapshot)
+        {
+            if (r.Name != name) _repos.Add(r);
+        }
         return Task.FromResult(true);
     }
 
     public Task<IReadOnlyList<RepoRecord>> GetAllAsync()
-        => Task.FromResult<IReadOnlyList<RepoRecord>>(_repos);
+        => Task.FromResult<IReadOnlyList<RepoRecord>>(_repos.ToArray());
 
     public Task<RepoRecord?> GetByNameAsync(string name)
         => Task.FromResult(_repos.FirstOrDefault(r => r.Name == name));

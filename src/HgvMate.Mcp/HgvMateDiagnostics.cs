@@ -45,7 +45,7 @@ internal static class HgvMateDiagnostics
     // ── Gauges (via ObservableGauge) ────────────────────────────────────
     private static long _activeRepoCount;
     private static long _totalChunkCount;
-    private static string _onnxProvider = "none";
+    private static volatile string _onnxProvider = "none";
     private static int _onnxThreadCount;
 
     public static readonly ObservableGauge<long> ActiveRepos = Meter.CreateObservableGauge(
