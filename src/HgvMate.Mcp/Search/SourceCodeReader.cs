@@ -117,7 +117,8 @@ public class SourceCodeReader
         {
             normalizedPath = path.Replace('\\', '/').Trim('/');
             var fullCheck = Path.GetFullPath(Path.Combine(resolvedRoot, normalizedPath));
-            if (!fullCheck.StartsWith(resolvedRoot, StringComparison.OrdinalIgnoreCase))
+            var relativePath = Path.GetRelativePath(resolvedRoot, fullCheck);
+            if (relativePath.StartsWith("..", StringComparison.Ordinal))
                 throw new UnauthorizedAccessException($"Path traversal attempt detected: '{path}'");
         }
 
@@ -132,10 +133,28 @@ public class SourceCodeReader
             UseShellExecute = false
         };
         process.Start();
-        var output = await process.StandardOutput.ReadToEndAsync();
-        await process.WaitForExitAsync();
 
-        var allFiles = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+
+        await Task.WhenAll(stdoutTask, stderrTask, process.WaitForExitAsync());
+
+        var output = stdoutTask.Result;
+        var errorOutput = stderrTask.Result;
+
+        if (process.ExitCode != 0)
+        {
+            _logger.LogError(
+                "git ls-tree failed for repository {RepoName} with exit code {ExitCode}. Error: {Error}",
+                repoName,
+                process.ExitCode,
+                errorOutput);
+
+            throw new InvalidOperationException(
+                $"git ls-tree failed for repository '{repoName}' with exit code {process.ExitCode}: {errorOutput}");
+        }
+
+        var allFiles = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         // Filter to the requested subtree
         IEnumerable<string> filtered = allFiles;
@@ -202,14 +221,32 @@ public class SourceCodeReader
             UseShellExecute = false
         };
         process.Start();
-        var output = await process.StandardOutput.ReadToEndAsync();
-        await process.WaitForExitAsync();
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+
+        await Task.WhenAll(stdoutTask, stderrTask, process.WaitForExitAsync());
+
+        var output = stdoutTask.Result;
+        var errorOutput = stderrTask.Result;
+
+        if (process.ExitCode != 0)
+        {
+            _logger.LogError(
+                "git ls-files in repository root '{RepoRoot}' failed with exit code {ExitCode}. stderr: {Error}",
+                resolvedRoot,
+                process.ExitCode,
+                errorOutput);
+
+            throw new InvalidOperationException(
+                $"git ls-files failed with exit code {process.ExitCode}. See logs for details.");
+        }
 
         var normalizedPattern = pattern.Replace('\\', '/');
         var hasPathSeparator = normalizedPattern.Contains('/');
 
         var matches = output
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(f =>
             {
                 if (hasPathSeparator)

@@ -151,6 +151,38 @@ public sealed class SourceCodeToolsTests
         StringAssert.Contains(result, "Error");
     }
 
+    [TestMethod]
+    public async Task GetRepoTree_HappyPath_ReturnsTreeWithDepthCollapsing()
+    {
+        // Set up a real git repo with committed files
+        var repoPath = Path.Combine(_tempDir, "repos", "gitrepo");
+        Directory.CreateDirectory(Path.Combine(repoPath, "src", "api", "controllers"));
+        File.WriteAllText(Path.Combine(repoPath, "README.md"), "# readme");
+        File.WriteAllText(Path.Combine(repoPath, "src", "app.cs"), "class App {}");
+        File.WriteAllText(Path.Combine(repoPath, "src", "api", "startup.cs"), "class Startup {}");
+        File.WriteAllText(Path.Combine(repoPath, "src", "api", "controllers", "home.cs"), "class Home {}");
+
+        var psi = new System.Diagnostics.ProcessStartInfo("git", "init") { WorkingDirectory = repoPath, RedirectStandardOutput = true, UseShellExecute = false };
+        System.Diagnostics.Process.Start(psi)!.WaitForExit();
+        psi = new System.Diagnostics.ProcessStartInfo("git", "config user.email test@test.com") { WorkingDirectory = repoPath, RedirectStandardOutput = true, UseShellExecute = false };
+        System.Diagnostics.Process.Start(psi)!.WaitForExit();
+        psi = new System.Diagnostics.ProcessStartInfo("git", "config user.name Test") { WorkingDirectory = repoPath, RedirectStandardOutput = true, UseShellExecute = false };
+        System.Diagnostics.Process.Start(psi)!.WaitForExit();
+        psi = new System.Diagnostics.ProcessStartInfo("git", "add .") { WorkingDirectory = repoPath, RedirectStandardOutput = true, UseShellExecute = false };
+        System.Diagnostics.Process.Start(psi)!.WaitForExit();
+        psi = new System.Diagnostics.ProcessStartInfo("git", "commit -m init") { WorkingDirectory = repoPath, RedirectStandardOutput = true, UseShellExecute = false };
+        System.Diagnostics.Process.Start(psi)!.WaitForExit();
+
+        var result = await _tools.GetRepoTree("gitrepo", depth: 2);
+
+        // Should contain the README at depth 1
+        StringAssert.Contains(result, "README.md");
+        // src/app.cs is at depth 2. Should be present.
+        StringAssert.Contains(result, "src/app.cs");
+        // src/api/ is a folder at depth 2, deeper files should be collapsed with trailing /
+        StringAssert.Contains(result, "src/api/");
+    }
+
     // ── FindFiles ───────────────────────────────────────────────────────
 
     [TestMethod]
@@ -172,6 +204,37 @@ public sealed class SourceCodeToolsTests
     {
         var result = await _tools.FindFiles("no-such-repo", "*.txt");
         StringAssert.Contains(result, "Error");
+    }
+
+    [TestMethod]
+    public async Task FindFiles_HappyPath_GlobMatchesFileNames()
+    {
+        // Set up a real git repo with committed files
+        var repoPath = Path.Combine(_tempDir, "repos", "gitrepo2");
+        Directory.CreateDirectory(Path.Combine(repoPath, "src"));
+        File.WriteAllText(Path.Combine(repoPath, "app.cs"), "class App {}");
+        File.WriteAllText(Path.Combine(repoPath, "readme.md"), "# hi");
+        File.WriteAllText(Path.Combine(repoPath, "src", "controller.cs"), "class Ctrl {}");
+        File.WriteAllText(Path.Combine(repoPath, "src", "data.json"), "{}");
+
+        var psi = new System.Diagnostics.ProcessStartInfo("git", "init") { WorkingDirectory = repoPath, RedirectStandardOutput = true, UseShellExecute = false };
+        System.Diagnostics.Process.Start(psi)!.WaitForExit();
+        psi = new System.Diagnostics.ProcessStartInfo("git", "config user.email test@test.com") { WorkingDirectory = repoPath, RedirectStandardOutput = true, UseShellExecute = false };
+        System.Diagnostics.Process.Start(psi)!.WaitForExit();
+        psi = new System.Diagnostics.ProcessStartInfo("git", "config user.name Test") { WorkingDirectory = repoPath, RedirectStandardOutput = true, UseShellExecute = false };
+        System.Diagnostics.Process.Start(psi)!.WaitForExit();
+        psi = new System.Diagnostics.ProcessStartInfo("git", "add .") { WorkingDirectory = repoPath, RedirectStandardOutput = true, UseShellExecute = false };
+        System.Diagnostics.Process.Start(psi)!.WaitForExit();
+        psi = new System.Diagnostics.ProcessStartInfo("git", "commit -m init") { WorkingDirectory = repoPath, RedirectStandardOutput = true, UseShellExecute = false };
+        System.Diagnostics.Process.Start(psi)!.WaitForExit();
+
+        // Match *.cs — should find app.cs and controller.cs but not readme.md or data.json
+        var result = await _tools.FindFiles("gitrepo2", "*.cs");
+
+        StringAssert.Contains(result, "app.cs");
+        StringAssert.Contains(result, "controller.cs");
+        Assert.IsFalse(result.Contains("readme.md"));
+        Assert.IsFalse(result.Contains("data.json"));
     }
 
     // ── GetTechStack ────────────────────────────────────────────────────

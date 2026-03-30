@@ -65,7 +65,7 @@ public class HybridSearchService
                     results.Add(new SearchResult(r.RepoName, r.FilePath, 0, r.Content, r.Score));
             }
 
-            IEnumerable<SearchResult> filtered = results.OrderByDescending(r => r.Score);
+            IEnumerable<SearchResult> filtered = results;
 
             // Apply extension filter
             if (includeExtensions?.Length > 0)
@@ -84,12 +84,18 @@ public class HybridSearchService
                     var normalizedPath = r.FilePath.Replace('\\', '/');
                     var fileName = Path.GetFileName(r.FilePath);
                     return !excludePatterns.Any(p =>
-                        System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(p, normalizedPath, ignoreCase: true) ||
-                        System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(p, fileName, ignoreCase: true));
+                    {
+                        var normalizedPattern = p.Replace('\\', '/');
+                        return System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(normalizedPattern, normalizedPath, ignoreCase: true) ||
+                               System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(p, fileName, ignoreCase: true);
+                    });
                 });
             }
 
-            return filtered.Take(_searchOptions.MaxResults).ToList();
+            return filtered
+                .OrderByDescending(r => r.Score)
+                .Take(_searchOptions.MaxResults)
+                .ToList();
         }
         finally
         {
