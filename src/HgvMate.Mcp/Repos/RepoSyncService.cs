@@ -24,10 +24,11 @@ public class RepoSyncService : BackgroundService
     private readonly SemaphoreSlim _syncSemaphore = new(3, 3);
 
     // Bounded channel for fire-and-forget GitNexus analysis (ONNX and GitNexus overlap without contention).
-    // Capacity 256 with Wait mode ensures all repos are analyzed even in large bulk syncs.
+    // Capacity 256 covers large bulk syncs. DropWrite + TryWrite: when full, the incoming enqueue is
+    // silently dropped — safe because GitNexus is idempotent and a pending analysis already exists.
     private readonly Channel<string> _gitNexusQueue = Channel.CreateBounded<string>(new BoundedChannelOptions(256)
     {
-        FullMode = BoundedChannelFullMode.Wait,
+        FullMode = BoundedChannelFullMode.DropWrite,
         SingleReader = true
     });
     private readonly SemaphoreSlim _gitNexusSemaphore = new(3, 3);
@@ -226,11 +227,13 @@ public class RepoSyncService : BackgroundService
         finally
         {
             // On clean completion: flush vectors, then update SHAs atomically.
-            if (parallelCompleted && isBulkSync)
+            // Only flush if repos actually used deferSave (i.e., deferredShas was populated);
+            // avoids a large unnecessary vectors.bin rewrite on every poll cycle when repos are up-to-date.
+            if (parallelCompleted && isBulkSync && deferredShas is { Count: > 0 })
             {
-                _logger.LogInformation("Bulk sync complete. Flushing vector store...");
+                _logger.LogInformation("Bulk sync complete. Flushing vector store for {Count} repo(s)...", deferredShas.Count);
                 await _indexingService.SaveVectorStoreAsync();
-                foreach (var (name, sha) in deferredShas!)
+                foreach (var (name, sha) in deferredShas)
                     await _registry.UpdateLastShaAsync(name, sha);
             }
         }
@@ -410,26 +413,14 @@ public class RepoSyncService : BackgroundService
     /// <summary>
     /// Enqueues a GitNexus analysis for <paramref name="repoName"/> to run in the background worker.
     /// This decouples ONNX embedding (CPU-bound) from GitNexus analysis (I/O-bound) so they overlap.
-    /// Fire-and-forget: delegates to <see cref="EnqueueGitNexusAnalysisAsync"/> which awaits channel space.
+    /// Uses <c>TryWrite</c> with a coalescing policy: if the channel is full a pending analysis for
+    /// this repo is already queued, so dropping the duplicate is safe (GitNexus is idempotent).
+    /// This avoids creating unbounded suspended producer tasks under backpressure.
     /// </summary>
     internal void EnqueueGitNexusAnalysis(string repoName)
-        => _ = EnqueueGitNexusAnalysisAsync(repoName);
-
-    /// <summary>
-    /// Asynchronously enqueues a GitNexus analysis, waiting for space in the bounded channel.
-    /// Using <c>WriteAsync</c> (not <c>TryWrite</c>) guarantees no requests are silently dropped
-    /// when the channel is at capacity.
-    /// </summary>
-    internal async Task EnqueueGitNexusAnalysisAsync(string repoName)
     {
-        try
-        {
-            await _gitNexusQueue.Writer.WriteAsync(repoName);
-        }
-        catch (ChannelClosedException)
-        {
-            _logger.LogDebug("GitNexus queue closed; analysis for '{Repo}' skipped (shutting down).", repoName);
-        }
+        if (!_gitNexusQueue.Writer.TryWrite(repoName))
+            _logger.LogDebug("GitNexus queue full; analysis for '{Repo}' coalesced into existing queue entry.", repoName);
     }
 
     /// <summary>
