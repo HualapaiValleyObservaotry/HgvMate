@@ -68,6 +68,9 @@ public class RepoSyncService : BackgroundService
     public string GetClonePath(string repoName)
         => Path.Combine(_syncOptions.ResolveCloneRoot(_hgvMateOptions.DataPath), repoName);
 
+    public virtual bool IsRepoCloned(string repoName)
+        => Directory.Exists(Path.Combine(GetClonePath(repoName), ".git"));
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Yield immediately so the host can finish starting (Kestrel begins accepting requests)
@@ -438,7 +441,6 @@ public class RepoSyncService : BackgroundService
 
         _logger.LogInformation("Vector-only reindex for '{Name}'...", repo.Name);
         await _indexingService.IndexRepoAsync(repo.Name, deferSave: false, cancellationToken);
-        await _indexingService.SaveVectorStoreAsync();
         _logger.LogInformation("Vector-only reindex complete for '{Name}'.", repo.Name);
     }
 

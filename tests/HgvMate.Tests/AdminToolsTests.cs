@@ -284,6 +284,8 @@ public sealed class AdminToolsTests
 
         public override Task ReindexGitNexusAsync(RepoRecord repo, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+
+        public override bool IsRepoCloned(string repoName) => true;
     }
 
     private sealed class FakeCredentialProvider : IGitCredentialProvider

@@ -1,8 +1,8 @@
 {
   "servers": {
-    "hgvmate-tailscale": {
+    "hgvmate-sse": {
       "type": "http",
-      "url": "https://docker.tail8bf22.ts.net/mcp"
+      "url": "http://localhost:5000/mcp"
     }
   }
 }

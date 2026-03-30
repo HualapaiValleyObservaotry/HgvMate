@@ -226,6 +226,11 @@ public static class ApiEndpoints
                     detail: $"scope must be one of: {string.Join(", ", validScopes)}.",
                     statusCode: StatusCodes.Status400BadRequest);
 
+            if (reindexScope != "all" && !syncService.IsRepoCloned(name))
+                return Results.Problem(
+                    detail: $"Repository '{name}' is not cloned yet. Run a full reindex first.",
+                    statusCode: StatusCodes.Status409Conflict);
+
             var isForce = force == true;
             _ = Task.Run(async () =>
             {

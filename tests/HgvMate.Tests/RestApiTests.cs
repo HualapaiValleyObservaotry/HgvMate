@@ -288,7 +288,7 @@ public sealed class RestApiTests : IDisposable
     }
 
     [TestMethod]
-    public async Task ReindexRepo_VectorsScope_ReturnsAccepted()
+    public async Task ReindexRepo_VectorsScope_UnclonedRepo_ReturnsConflict()
     {
         await using var app = await CreateTestApp();
         var client = app.GetTestClient();
@@ -297,14 +297,14 @@ public sealed class RestApiTests : IDisposable
 
         var response = await client.PostAsync("/api/repositories/vec-repo/reindex?scope=vectors", null);
 
-        Assert.AreEqual(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var message = body.GetProperty("message").GetString()!;
-        Assert.Contains("scope: vectors", message);
+        Assert.IsTrue(body.TryGetProperty("detail", out var detail));
+        Assert.Contains("not cloned yet", detail.GetString()!);
     }
 
     [TestMethod]
-    public async Task ReindexRepo_GitNexusScope_ReturnsAccepted()
+    public async Task ReindexRepo_GitNexusScope_UnclonedRepo_ReturnsConflict()
     {
         await using var app = await CreateTestApp();
         var client = app.GetTestClient();
@@ -313,10 +313,10 @@ public sealed class RestApiTests : IDisposable
 
         var response = await client.PostAsync("/api/repositories/gn-repo/reindex?scope=gitnexus", null);
 
-        Assert.AreEqual(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var message = body.GetProperty("message").GetString()!;
-        Assert.Contains("scope: gitnexus", message);
+        Assert.IsTrue(body.TryGetProperty("detail", out var detail));
+        Assert.Contains("not cloned yet", detail.GetString()!);
     }
 
     [TestMethod]

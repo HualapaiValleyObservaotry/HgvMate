@@ -131,6 +131,9 @@ public class AdminTools
                 if (repo == null)
                     return $"Error: Repository '{repository}' not found.";
 
+                if (!scope.Equals("all", StringComparison.OrdinalIgnoreCase) && !_syncService.IsRepoCloned(repository))
+                    return $"Error: Repository '{repository}' is not cloned yet. Run a full reindex (scope 'all') first.";
+
                 _ = Task.Run(async () =>
                 {
                     try
