@@ -1,4 +1,4 @@
-﻿using HgvMate.Mcp;
+using HgvMate.Mcp;
 using HgvMate.Mcp.Api;
 using HgvMate.Mcp.Configuration;
 using HgvMate.Mcp.Repos;
@@ -9,15 +9,13 @@ using HVO.Enterprise.Telemetry.Abstractions;
 using HVO.Enterprise.Telemetry.Correlation;
 using HVO.Enterprise.Telemetry.HealthChecks;
 using HVO.Enterprise.Telemetry.Logging;
+using HVO.Enterprise.Telemetry.OpenTelemetry;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using OpenTelemetry;
-using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
-using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Scalar.AspNetCore;
 
@@ -166,45 +164,32 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
     var telemetrySection = configuration.GetSection("Telemetry");
     var serviceName = telemetrySection["ServiceName"] ?? "HgvMate";
     var serviceVersion = telemetrySection["ServiceVersion"] ?? "1.0.0";
-    // OTEL_EXPORTER_OTLP_ENDPOINT is auto-detected from environment (e.g. Aspire Dashboard sidecar)
     var otlpEndpoint = telemetrySection["OtlpEndpoint"]
         ?? Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
     if (!string.IsNullOrEmpty(otlpEndpoint))
     {
-        // Auto-detect transport from endpoint: port 4318 = HTTP/protobuf, otherwise gRPC
-        var otlpProtocol = OtlpExportProtocol.Grpc;
-        var otlpTransportLabel = "gRPC";
-        if (Uri.TryCreate(otlpEndpoint, UriKind.Absolute, out var parsedUri) && parsedUri.Port == 4318)
+        services.AddOpenTelemetryExport(options =>
         {
-            otlpProtocol = OtlpExportProtocol.HttpProtobuf;
-            otlpTransportLabel = "HTTP/protobuf";
-        }
-        Console.WriteLine($"[OTLP] Configuring OpenTelemetry export: endpoint={otlpEndpoint}, transport={otlpTransportLabel}, service={serviceName}");
+            options.ServiceName = serviceName;
+            options.ServiceVersion = serviceVersion;
+            options.Endpoint = otlpEndpoint;
+            options.EnableLogExport = true;
+            options.EnableStandardMeters = true;
 
-        var otlpUri = new Uri(otlpEndpoint);
-        services.AddOpenTelemetry()
-            .ConfigureResource(r => r.AddService(serviceName, serviceVersion: serviceVersion))
-            .UseOtlpExporter(otlpProtocol, otlpUri)
-            .WithTracing(b =>
+            options.AdditionalActivitySources.Add(HgvMateDiagnostics.ServiceName);
+            options.AdditionalMeterNames.Add(HgvMateDiagnostics.ServiceName);
+
+            options.ConfigureTracerProvider = builder =>
             {
-                b.AddSource("HgvMate");
-                b.AddAspNetCoreInstrumentation();
-                b.AddHttpClientInstrumentation();
-            })
-            .WithMetrics(b =>
+                builder.AddAspNetCoreInstrumentation();
+                builder.AddHttpClientInstrumentation();
+            };
+            options.ConfigureMeterProvider = builder =>
             {
-                b.AddMeter("HgvMate");
-                b.AddMeter("Microsoft.AspNetCore.Hosting");
-                b.AddMeter("Microsoft.AspNetCore.Server.Kestrel");
-                b.AddMeter("System.Net.Http");
-                b.AddProcessInstrumentation();
-                b.AddRuntimeInstrumentation();
-            })
-            .WithLogging();
-    }
-    else
-    {
-        Console.WriteLine("[OTLP] No OTLP endpoint configured — skipping OpenTelemetry export.");
+                builder.AddProcessInstrumentation();
+                builder.AddRuntimeInstrumentation();
+            };
+        });
     }
 
     services.AddTelemetryStatistics();
@@ -237,5 +222,3 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
     services.AddSingleton<IndexingService>();
     services.AddSingleton<HybridSearchService>();
 }
-
-
