@@ -645,9 +645,6 @@ public sealed class RepoSyncServiceTests
         };
 
         var (svc, indexing, _) = await BuildServiceAsync(_tempDir, responses);
-        var enqueuedRepos = new List<string>();
-        // We can't directly observe the channel write, but we can verify by checking that
-        // a structural-extension file would have triggered it vs doc-only should not.
         // The HasStructuralChanges static helper is tested above; here we verify the full path runs.
         await svc.SyncRepoAsync(repo);
 
@@ -687,13 +684,12 @@ public sealed class RepoSyncServiceTests
 
     [TestMethod]
     [TestCategory("Unit")]
-    public void EnqueueGitNexusAnalysis_DoesNotThrow_WhenCalledMultipleTimes()
+    public async Task EnqueueGitNexusAnalysis_DoesNotThrow_WhenCalledManyTimes()
     {
         // Verifies the bounded channel doesn't deadlock/throw when called many times
-        BuildServiceAsync(_tempDir).GetAwaiter().GetResult();
-        var (svc, _, _) = BuildServiceAsync(_tempDir).GetAwaiter().GetResult();
+        var (svc, _, _) = await BuildServiceAsync(_tempDir);
 
-        // Enqueue many times — bounded channel with DropOldest should handle gracefully
+        // Enqueue many times — bounded channel with Wait mode should accept all entries
         for (int i = 0; i < 50; i++)
             svc.EnqueueGitNexusAnalysis($"repo{i}");
     }
@@ -751,13 +747,6 @@ public sealed class RepoSyncServiceTests
             : base(vectorStore, embedder, reader, searchOptions, NullLogger<IndexingService>.Instance)
         {
             VectorStore = vectorStore;
-        }
-
-        public override Task<IndexResult> IndexRepoAsync(string repoName, CancellationToken cancellationToken = default)
-        {
-            IndexRepoCalls++;
-            DeferSaveValues.Add(false);
-            return base.IndexRepoAsync(repoName, cancellationToken);
         }
 
         public override Task<IndexResult> IndexRepoAsync(string repoName, bool deferSave, CancellationToken cancellationToken = default)

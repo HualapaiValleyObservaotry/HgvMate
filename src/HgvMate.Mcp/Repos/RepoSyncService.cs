@@ -23,10 +23,11 @@ public class RepoSyncService : BackgroundService
     // Limit concurrent syncs to prevent OOM from unbounded parallel git clones + ONNX indexing
     private readonly SemaphoreSlim _syncSemaphore = new(3, 3);
 
-    // Bounded channel for fire-and-forget GitNexus analysis (ONNX and GitNexus overlap without contention)
-    private readonly Channel<string> _gitNexusQueue = Channel.CreateBounded<string>(new BoundedChannelOptions(32)
+    // Bounded channel for fire-and-forget GitNexus analysis (ONNX and GitNexus overlap without contention).
+    // Capacity 256 with Wait mode ensures all repos are analyzed even in large bulk syncs.
+    private readonly Channel<string> _gitNexusQueue = Channel.CreateBounded<string>(new BoundedChannelOptions(256)
     {
-        FullMode = BoundedChannelFullMode.DropOldest,
+        FullMode = BoundedChannelFullMode.Wait,
         SingleReader = true
     });
     private readonly SemaphoreSlim _gitNexusSemaphore = new(3, 3);
@@ -73,53 +74,82 @@ public class RepoSyncService : BackgroundService
         // Start the GitNexus background worker — runs concurrently with ONNX embedding
         var gitNexusWorker = RunGitNexusWorkerAsync(stoppingToken);
 
-        // Wait for data stores to be initialized by WarmupService
-        _logger.LogInformation("RepoSyncService waiting for warmup to complete...");
-        while (!_startupState.IsReady && !stoppingToken.IsCancellationRequested)
-            await Task.Delay(500, stoppingToken);
-
-        _logger.LogInformation("RepoSyncService starting...");
-        await RunSyncSafelyAsync(stoppingToken);
-
-        if (_syncOptions.PollIntervalMinutes <= 0)
+        try
         {
-            _logger.LogInformation("Polling disabled (PollIntervalMinutes=0). Use hgvmate_reindex to sync manually.");
+            // Wait for data stores to be initialized by WarmupService
+            _logger.LogInformation("RepoSyncService waiting for warmup to complete...");
+            while (!_startupState.IsReady && !stoppingToken.IsCancellationRequested)
+                await Task.Delay(500, stoppingToken);
+
+            _logger.LogInformation("RepoSyncService starting...");
+            await RunSyncSafelyAsync(stoppingToken);
+
+            if (_syncOptions.PollIntervalMinutes <= 0)
+            {
+                _logger.LogInformation("Polling disabled (PollIntervalMinutes=0). Use hgvmate_reindex to sync manually.");
+                return;
+            }
+
+            using var timer = new PeriodicTimer(TimeSpan.FromMinutes(_syncOptions.PollIntervalMinutes));
+            while (await timer.WaitForNextTickAsync(stoppingToken))
+            {
+                await RunSyncSafelyAsync(stoppingToken);
+            }
+        }
+        finally
+        {
+            // Always signal the worker to drain and await it for a clean shutdown
             _gitNexusQueue.Writer.TryComplete();
             await gitNexusWorker;
-            return;
-        }
-
-        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(_syncOptions.PollIntervalMinutes));
-        while (await timer.WaitForNextTickAsync(stoppingToken))
-        {
-            await RunSyncSafelyAsync(stoppingToken);
         }
     }
 
     /// <summary>
     /// Background worker that drains the GitNexus analysis queue. Running separately from the
     /// sync loop lets ONNX embedding (CPU-bound) and GitNexus analysis (I/O-bound) overlap.
+    /// Tracks all in-flight analysis tasks and awaits them before returning so shutdown is clean.
     /// </summary>
     private async Task RunGitNexusWorkerAsync(CancellationToken cancellationToken)
     {
-        await foreach (var repoName in _gitNexusQueue.Reader.ReadAllAsync(cancellationToken))
+        var inFlightTasks = new List<Task>();
+        try
         {
-            await _gitNexusSemaphore.WaitAsync(cancellationToken);
-            _ = Task.Run(async () =>
+            await foreach (var repoName in _gitNexusQueue.Reader.ReadAllAsync(cancellationToken))
             {
-                try
+                await _gitNexusSemaphore.WaitAsync(cancellationToken);
+                // Do not pass cancellationToken to Task.Run — a cancelled token would prevent the
+                // delegate from running while still holding the semaphore permit (leak).
+                // Instead, handle cancellation inside the delegate itself.
+                inFlightTasks.Add(Task.Run(async () =>
                 {
-                    await _gitNexusService.AnalyzeAsync(repoName, cancellationToken);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger.LogWarning(ex, "Background GitNexus analysis failed for '{Repo}'; continuing.", repoName);
-                }
-                finally
-                {
-                    _gitNexusSemaphore.Release();
-                }
-            }, cancellationToken);
+                    try
+                    {
+                        await _gitNexusService.AnalyzeAsync(repoName, cancellationToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Shutting down — analysis abandoned gracefully
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Background GitNexus analysis failed for '{Repo}'; continuing.", repoName);
+                    }
+                    finally
+                    {
+                        _gitNexusSemaphore.Release();
+                    }
+                }));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown signaled — fall through to await any already-started tasks
+        }
+        finally
+        {
+            // Await all in-flight analyses so they are not abandoned on shutdown
+            if (inFlightTasks.Count > 0)
+                await Task.WhenAll(inFlightTasks);
         }
     }
 
@@ -157,37 +187,68 @@ public class RepoSyncService : BackgroundService
 
         bool isBulkSync = enabledRepos.Count > 1;
 
-        // Process repos in parallel (up to 3 concurrent) — the semaphore inside SyncRepoAsync gates
-        // individual resource use; Parallel.ForEachAsync provides the outer concurrency control.
-        await Parallel.ForEachAsync(enabledRepos, new ParallelOptions
-        {
-            MaxDegreeOfParallelism = 3,
-            CancellationToken = cancellationToken
-        }, async (repo, ct) =>
-        {
-            await SyncRepoAsync(repo, force, isBulkSync, ct);
-        });
+        // Collect deferred SHA updates — applied only after a successful vector store flush
+        // to avoid registry/vector-store inconsistency if the process crashes mid-bulk.
+        var deferredShas = isBulkSync ? new System.Collections.Concurrent.ConcurrentDictionary<string, string>() : null;
 
-        // During bulk sync, individual repos defer SaveAsync — flush once at the end.
-        if (isBulkSync)
+        bool parallelCompleted = false;
+        try
         {
-            _logger.LogInformation("Bulk sync complete. Flushing vector store...");
-            await _indexingService.SaveVectorStoreAsync();
+            // Process repos in parallel (up to 3 concurrent) — the semaphore inside SyncRepoAsync gates
+            // individual resource use; Parallel.ForEachAsync provides the outer concurrency control.
+            await Parallel.ForEachAsync(enabledRepos, new ParallelOptions
+            {
+                MaxDegreeOfParallelism = 3,
+                CancellationToken = cancellationToken
+            }, async (repo, ct) =>
+            {
+                await SyncRepoAsync(repo, force, isBulkSync, deferredShas, ct);
+            });
+            parallelCompleted = true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Partial progress: flush any vectors already indexed so the work is not lost.
+            // SHA updates are skipped — next sync cycle will re-detect changes.
+            if (isBulkSync && deferredShas!.Count > 0)
+            {
+                _logger.LogInformation("Bulk sync canceled; flushing partial vectors for {Count} repo(s).", deferredShas.Count);
+                try { await _indexingService.SaveVectorStoreAsync(); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Partial vector flush failed after cancellation."); }
+            }
+            throw;
+        }
+        finally
+        {
+            // On clean completion: flush vectors, then update SHAs atomically.
+            if (parallelCompleted && isBulkSync)
+            {
+                _logger.LogInformation("Bulk sync complete. Flushing vector store...");
+                await _indexingService.SaveVectorStoreAsync();
+                foreach (var (name, sha) in deferredShas!)
+                    await _registry.UpdateLastShaAsync(name, sha);
+            }
         }
     }
 
     public virtual async Task SyncRepoAsync(RepoRecord repo, CancellationToken cancellationToken = default)
-        => await SyncRepoAsync(repo, force: false, isBulkSync: false, cancellationToken);
+        => await SyncRepoAsync(repo, force: false, isBulkSync: false, deferredShas: null, cancellationToken);
 
     public virtual async Task SyncRepoAsync(RepoRecord repo, bool force, CancellationToken cancellationToken = default)
-        => await SyncRepoAsync(repo, force, isBulkSync: false, cancellationToken);
+        => await SyncRepoAsync(repo, force, isBulkSync: false, deferredShas: null, cancellationToken);
 
     public virtual async Task SyncRepoAsync(RepoRecord repo, bool force, bool isBulkSync, CancellationToken cancellationToken = default)
+        => await SyncRepoAsync(repo, force, isBulkSync, deferredShas: null, cancellationToken);
+
+    internal virtual async Task SyncRepoAsync(
+        RepoRecord repo, bool force, bool isBulkSync,
+        System.Collections.Concurrent.ConcurrentDictionary<string, string>? deferredShas,
+        CancellationToken cancellationToken = default)
     {
         await _syncSemaphore.WaitAsync(cancellationToken);
         try
         {
-            await SyncRepoInternalAsync(repo, force, isBulkSync, cancellationToken);
+            await SyncRepoInternalAsync(repo, force, isBulkSync, deferredShas, cancellationToken);
         }
         finally
         {
@@ -195,7 +256,10 @@ public class RepoSyncService : BackgroundService
         }
     }
 
-    private async Task SyncRepoInternalAsync(RepoRecord repo, bool force, bool isBulkSync, CancellationToken cancellationToken)
+    private async Task SyncRepoInternalAsync(
+        RepoRecord repo, bool force, bool isBulkSync,
+        System.Collections.Concurrent.ConcurrentDictionary<string, string>? deferredShas,
+        CancellationToken cancellationToken)
     {
         using var activity = HgvMateDiagnostics.ActivitySource.StartActivity("SyncRepo");
         activity?.SetTag("hgvmate.repo.name", repo.Name);
@@ -246,14 +310,14 @@ public class RepoSyncService : BackgroundService
                         repo.Name, newSha);
                     // GitNexus index is ephemeral; always rebuild it
                     EnqueueGitNexusAnalysis(repo.Name);
-                    await _registry.UpdateLastShaAsync(repo.Name, newSha);
+                    await SetLastShaAsync(repo.Name, newSha, deferredShas);
                 }
                 else
                 {
                     // First sync or no cached vectors: full index
                     await _indexingService.IndexRepoAsync(repo.Name, deferSave: isBulkSync, cancellationToken);
                     EnqueueGitNexusAnalysis(repo.Name);
-                    await _registry.UpdateLastShaAsync(repo.Name, newSha);
+                    await SetLastShaAsync(repo.Name, newSha, deferredShas);
                 }
             }
             else if (oldSha != newSha)
@@ -272,7 +336,7 @@ public class RepoSyncService : BackgroundService
                     await _indexingService.SaveVectorStoreAsync();
 
                     // Only re-analyze with GitNexus if structural (AST-parseable) files changed
-                    if (changedFiles.Any(f => StructuralExtensions.Contains(Path.GetExtension(f))))
+                    if (HasStructuralChanges(changedFiles))
                         EnqueueGitNexusAnalysis(repo.Name);
                     else
                         _logger.LogInformation("No structural file changes in '{Name}'. Skipping GitNexus re-analysis.", repo.Name);
@@ -284,7 +348,7 @@ public class RepoSyncService : BackgroundService
                     await _indexingService.IndexRepoAsync(repo.Name, deferSave: isBulkSync, cancellationToken);
                     EnqueueGitNexusAnalysis(repo.Name);
                 }
-                await _registry.UpdateLastShaAsync(repo.Name, newSha);
+                await SetLastShaAsync(repo.Name, newSha, deferredShas);
             }
             else if (force)
             {
@@ -344,8 +408,23 @@ public class RepoSyncService : BackgroundService
     /// </summary>
     internal void EnqueueGitNexusAnalysis(string repoName)
     {
+        // Channel uses Wait mode — TryWrite always succeeds unless the channel is completed
         if (!_gitNexusQueue.Writer.TryWrite(repoName))
-            _logger.LogDebug("GitNexus queue full; analysis for '{Repo}' will be superseded by a newer entry.", repoName);
+            _logger.LogDebug("GitNexus queue closed; analysis for '{Repo}' skipped (shutting down).", repoName);
+    }
+
+    /// <summary>
+    /// Updates the last-known SHA for a repo. During bulk sync, defers the registry write by
+    /// storing the SHA in <paramref name="deferredShas"/> (applied after the vector store flush).
+    /// </summary>
+    private async Task SetLastShaAsync(
+        string repoName, string sha,
+        System.Collections.Concurrent.ConcurrentDictionary<string, string>? deferredShas)
+    {
+        if (deferredShas != null)
+            deferredShas[repoName] = sha;
+        else
+            await _registry.UpdateLastShaAsync(repoName, sha);
     }
 
     /// <summary>
