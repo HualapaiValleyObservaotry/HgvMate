@@ -41,6 +41,14 @@ if (useSse)
 
     ConfigureServices(builder.Services, builder.Configuration, transport);
 
+    builder.Services.AddCors(options =>
+    {
+        options.AddDefaultPolicy(policy =>
+            policy.AllowAnyOrigin()
+                  .AllowAnyMethod()
+                  .AllowAnyHeader());
+    });
+
     builder.Services.AddOpenApi();
 
     // ProblemDetails (RFC 7807) for standardised error responses
@@ -113,6 +121,7 @@ if (useSse)
     });
 
     app.UseRateLimiter();
+    app.UseCors();
 
     app.MapOpenApi();
     app.MapScalarApiReference();
