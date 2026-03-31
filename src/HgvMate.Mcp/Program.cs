@@ -41,6 +41,31 @@ if (useSse)
 
     ConfigureServices(builder.Services, builder.Configuration, transport);
 
+    builder.Services.AddCors(options =>
+    {
+        var corsSection = builder.Configuration.GetSection("Cors");
+        var allowedOriginsConfig = corsSection["AllowedOrigins"];
+        var allowedOrigins = allowedOriginsConfig?
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            ?? Array.Empty<string>();
+
+        options.AddDefaultPolicy(policy =>
+        {
+            if (builder.Environment.IsDevelopment() && allowedOrigins.Length == 0)
+            {
+                policy.AllowAnyOrigin()
+                      .AllowAnyMethod()
+                      .AllowAnyHeader();
+            }
+            else if (allowedOrigins.Length > 0)
+            {
+                policy.WithOrigins(allowedOrigins)
+                      .AllowAnyMethod()
+                      .AllowAnyHeader();
+            }
+        });
+    });
+
     builder.Services.AddOpenApi();
 
     // ProblemDetails (RFC 7807) for standardised error responses
@@ -113,6 +138,7 @@ if (useSse)
     });
 
     app.UseRateLimiter();
+    app.UseCors();
 
     app.MapOpenApi();
     app.MapScalarApiReference();
