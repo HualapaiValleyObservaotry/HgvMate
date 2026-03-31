@@ -234,6 +234,26 @@ public sealed class RestApiTests : IDisposable
     }
 
     [TestMethod]
+    [TestCategory("Unit")]
+    public async Task CorsPreflightReturnsAllowHeaders()
+    {
+        await using var app = await CreateTestApp();
+        var client = app.GetTestClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Options, "/api/diagnostics");
+        request.Headers.Add("Origin", "https://example.com");
+        request.Headers.Add("Access-Control-Request-Method", "GET");
+
+        var response = await client.SendAsync(request);
+
+        Assert.AreEqual(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.IsTrue(response.Headers.Contains("Access-Control-Allow-Origin"),
+            "Response should include Access-Control-Allow-Origin header.");
+        Assert.IsTrue(response.Headers.Contains("Access-Control-Allow-Methods"),
+            "Response should include Access-Control-Allow-Methods header.");
+    }
+
+    [TestMethod]
     public async Task ScalarUI_IsAvailable()
     {
         await using var app = await CreateTestApp();
@@ -561,6 +581,13 @@ public sealed class RestApiTests : IDisposable
             options.Enabled = true;
         });
 
+        builder.Services.AddCors(options =>
+        {
+            options.AddDefaultPolicy(policy =>
+                policy.AllowAnyOrigin()
+                      .AllowAnyMethod()
+                      .AllowAnyHeader());
+        });
         builder.Services.AddOpenApi();
         builder.Services.AddProblemDetails();
 
@@ -587,6 +614,7 @@ public sealed class RestApiTests : IDisposable
             startupState.MarkOnnxReady();
         }
 
+        app.UseCors();
         app.MapOpenApi();
         app.MapScalarApiReference();
         app.MapMcp("/mcp");

@@ -43,10 +43,27 @@ if (useSse)
 
     builder.Services.AddCors(options =>
     {
+        var corsSection = builder.Configuration.GetSection("Cors");
+        var allowedOriginsConfig = corsSection["AllowedOrigins"];
+        var allowedOrigins = allowedOriginsConfig?
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            ?? Array.Empty<string>();
+
         options.AddDefaultPolicy(policy =>
-            policy.AllowAnyOrigin()
-                  .AllowAnyMethod()
-                  .AllowAnyHeader());
+        {
+            if (builder.Environment.IsDevelopment() && allowedOrigins.Length == 0)
+            {
+                policy.AllowAnyOrigin()
+                      .AllowAnyMethod()
+                      .AllowAnyHeader();
+            }
+            else if (allowedOrigins.Length > 0)
+            {
+                policy.WithOrigins(allowedOrigins)
+                      .AllowAnyMethod()
+                      .AllowAnyHeader();
+            }
+        });
     });
 
     builder.Services.AddOpenApi();
