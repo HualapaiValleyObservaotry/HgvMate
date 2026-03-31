@@ -66,7 +66,24 @@ if (useSse)
         });
     });
 
-    builder.Services.AddOpenApi();
+    builder.Services.AddOpenApi(options =>
+    {
+        options.AddDocumentTransformer((document, context, _) =>
+        {
+            var request = context.ApplicationServices
+                .GetRequiredService<IHttpContextAccessor>().HttpContext?.Request;
+            if (request is not null)
+            {
+                var scheme = request.Headers["X-Forwarded-Proto"].FirstOrDefault()
+                    ?? request.Scheme;
+                var host = request.Headers["X-Forwarded-Host"].FirstOrDefault()
+                    ?? request.Host.ToString();
+                document.Servers = [new() { Url = $"{scheme}://{host}" }];
+            }
+            return Task.CompletedTask;
+        });
+    });
+    builder.Services.AddHttpContextAccessor();
 
     // ProblemDetails (RFC 7807) for standardised error responses
     builder.Services.AddProblemDetails();
