@@ -21,6 +21,8 @@ services:
       # ONNX thread control — 0=auto-detect (half of available CPUs)
       - Search__OnnxThreadCount=0
       - Search__OnnxBatchSize=32
+      # CORS — allow Scalar UI and Tailscale hostname
+      - Cors__AllowedOrigins=https://docker.tail8bf22.ts.net,http://docker.tail8bf22.ts.net
       # Telemetry → Aspire Dashboard sidecar
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://aspire-dashboard:18889
       # Credentials (set these or use a .env file)
