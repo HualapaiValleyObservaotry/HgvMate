@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html><head><style>
+  body { font-family: Segoe UI, sans-serif; padding: 20px; max-width: 900px; }
+  h2 { color: #333; margin-top: 24px; margin-bottom: 8px; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
+  th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: #f0f0f0; font-weight: 600; }
+  code { background: #e8e8e8; padding: 1px 4px; border-radius: 3px; font-size: 13px; }
+  .req { font-weight: bold; }
+  .opt { color: #666; }
+</style></head><body>
+
+<h1>HgvMate MCP Tools</h1>
+
+<h2>Repository Management</h2>
+<table>
+<tr><th>Tool</th><th>Description</th><th>Parameters</th></tr>
+<tr><td><code>hgvmate_add_repository</code></td><td>Add a repository to be indexed</td><td><span class="req">name</span>, <span class="req">url</span>, <span class="opt">branch (default: main)</span>, <span class="opt">source (default: github)</span></td></tr>
+<tr><td><code>hgvmate_remove_repository</code></td><td>Remove a repository and delete its cloned data</td><td><span class="req">name</span></td></tr>
+<tr><td><code>hgvmate_list_repositories</code></td><td>List all registered repositories with sync status</td><td><span class="opt">none</span></td></tr>
+<tr><td><code>hgvmate_reindex</code></td><td>Trigger immediate sync and re-index for one or all repos</td><td><span class="opt">repository, scope (all / vectors / gitnexus)</span></td></tr>
+<tr><td><code>hgvmate_index_status</code></td><td>Get per-repo index status (clone state, last SHA, sync)</td><td><span class="opt">repository</span></td></tr>
+</table>
+
+<h2>File Browsing</h2>
+<table>
+<tr><th>Tool</th><th>Description</th><th>Parameters</th></tr>
+<tr><td><code>hgvmate_get_repo_tree</code></td><td>List file/folder structure up to a specified depth</td><td><span class="req">repository</span>, <span class="opt">path, depth (default: 2, max: 10)</span></td></tr>
+<tr><td><code>hgvmate_get_file_content</code></td><td>Read a source file from a cloned repository</td><td><span class="req">repository</span>, <span class="req">path</span></td></tr>
+<tr><td><code>hgvmate_find_files</code></td><td>Search for files by name or glob pattern</td><td><span class="req">repository</span>, <span class="req">pattern</span></td></tr>
+</table>
+
+<h2>Code Search</h2>
+<table>
+<tr><th>Tool</th><th>Description</th><th>Parameters</th></tr>
+<tr><td><code>hgvmate_search_source_code</code></td><td>Search source code using text and semantic search</td><td><span class="req">query</span>, <span class="opt">repository, includeExtensions, excludePatterns</span></td></tr>
+</table>
+
+<h2>Structural Analysis (GitNexus)</h2>
+<table>
+<tr><th>Tool</th><th>Description</th><th>Parameters</th></tr>
+<tr><td><code>hgvmate_find_symbol</code></td><td>Find a symbol with callers, callees, and hierarchy</td><td><span class="req">name</span>, <span class="opt">repository</span></td></tr>
+<tr><td><code>hgvmate_get_references</code></td><td>Find all references to a symbol</td><td><span class="req">name</span>, <span class="opt">repository</span></td></tr>
+<tr><td><code>hgvmate_get_call_chain</code></td><td>Trace the full call chain for a symbol</td><td><span class="req">name</span>, <span class="opt">repository</span></td></tr>
+<tr><td><code>hgvmate_get_impact</code></td><td>Blast radius — what's affected if a symbol changes</td><td><span class="req">name</span>, <span class="opt">repository</span></td></tr>
+</table>
+
+<h2>Metadata &amp; Analytics</h2>
+<table>
+<tr><th>Tool</th><th>Description</th><th>Parameters</th></tr>
+<tr><td><code>hgvmate_get_techstack</code></td><td>Get tech stack metadata from techstack.yml</td><td><span class="req">repository</span></td></tr>
+<tr><td><code>hgvmate_server_info</code></td><td>Get server identity, version, uptime, capabilities</td><td><span class="opt">none</span></td></tr>
+<tr><td><code>hgvmate_usage_report</code></td><td>Tool usage analytics (top tools, searches, sequences, errors)</td><td><span class="opt">report (summary / repeated_searches / sequences / errors / all), from, to</span></td></tr>
+</table>
+
+<p><small><b>Bold</b> = required · <span style="color:#666">Grey</span> = optional</small></p>
+
+</body></html>
